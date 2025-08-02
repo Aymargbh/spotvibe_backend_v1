@@ -1,0 +1,461 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('SpotVibe Administration') }}{% endblock %}
+
+{% block branding %}
+<div class="d-flex align-items-center">
+    <h1 id="site-name" class="text-primary mb-0">
+        <i class="fas fa-calendar-alt me-2"></i>
+        <a href="{% url 'admin:index' %}" class="text-decoration-none text-primary">
+            SpotVibe Administration
+        </a>
+    </h1>
+</div>
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<style>
+    /* Couleurs principales */
+    :root {
+        --primary-color: #007bff;
+        --secondary-color: #6c757d;
+        --success-color: #28a745;
+        --danger-color: #dc3545;
+        --warning-color: #ffc107;
+        --info-color: #17a2b8;
+        --light-color: #f8f9fa;
+        --dark-color: #343a40;
+    }
+
+    /* Header personnalisé */
+    #header {
+        background: linear-gradient(135deg, var(--primary-color), #0056b3);
+        color: white;
+        padding: 1rem 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    #site-name a {
+        color: white !important;
+        font-weight: 600;
+        font-size: 1.5rem;
+    }
+
+    #user-tools {
+        color: white;
+    }
+
+    #user-tools a {
+        color: white !important;
+        text-decoration: none;
+        margin-left: 1rem;
+    }
+
+    #user-tools a:hover {
+        text-decoration: underline !important;
+    }
+
+    /* Navigation */
+    .breadcrumbs {
+        background-color: var(--light-color);
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .breadcrumbs a {
+        color: var(--primary-color);
+        text-decoration: none;
+    }
+
+    .breadcrumbs a:hover {
+        text-decoration: underline;
+    }
+
+    /* Contenu principal */
+    #content {
+        padding: 2rem 1rem;
+        background-color: #f8f9fa;
+        min-height: calc(100vh - 200px);
+    }
+
+    /* Cartes et modules */
+    .module {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+        overflow: hidden;
+    }
+
+    .module h2 {
+        background: var(--primary-color);
+        color: white;
+        margin: 0;
+        padding: 1rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    .module table {
+        margin: 0;
+    }
+
+    /* Boutons */
+    .button, input[type=submit], input[type=button], .submit-row input, button {
+        background: var(--primary-color);
+        border: none;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.3s ease;
+    }
+
+    .button:hover, input[type=submit]:hover, input[type=button]:hover, .submit-row input:hover, button:hover {
+        background: #0056b3;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .button.default, .default {
+        background: var(--success-color);
+    }
+
+    .button.default:hover, .default:hover {
+        background: #218838;
+    }
+
+    /* Messages */
+    .messagelist {
+        margin: 0 0 1rem 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .messagelist li {
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.5rem;
+        border-radius: 4px;
+        border-left: 4px solid;
+    }
+
+    .messagelist .success {
+        background-color: #d4edda;
+        border-left-color: var(--success-color);
+        color: #155724;
+    }
+
+    .messagelist .error {
+        background-color: #f8d7da;
+        border-left-color: var(--danger-color);
+        color: #721c24;
+    }
+
+    .messagelist .warning {
+        background-color: #fff3cd;
+        border-left-color: var(--warning-color);
+        color: #856404;
+    }
+
+    .messagelist .info {
+        background-color: #d1ecf1;
+        border-left-color: var(--info-color);
+        color: #0c5460;
+    }
+
+    /* Tableaux */
+    #result_list {
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    #result_list thead th {
+        background: var(--primary-color);
+        color: white;
+        font-weight: 600;
+        padding: 1rem 0.75rem;
+        border: none;
+    }
+
+    #result_list tbody tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    #result_list tbody tr:hover {
+        background-color: #e3f2fd;
+    }
+
+    #result_list td, #result_list th {
+        padding: 0.75rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    /* Filtres */
+    #changelist-filter {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        padding: 1rem;
+    }
+
+    #changelist-filter h3 {
+        color: var(--primary-color);
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid var(--primary-color);
+    }
+
+    #changelist-filter ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    #changelist-filter li {
+        padding: 0.25rem 0;
+    }
+
+    #changelist-filter a {
+        color: var(--dark-color);
+        text-decoration: none;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        display: block;
+        transition: all 0.3s ease;
+    }
+
+    #changelist-filter a:hover {
+        background-color: var(--light-color);
+        color: var(--primary-color);
+    }
+
+    #changelist-filter a.selected {
+        background-color: var(--primary-color);
+        color: white;
+        font-weight: 600;
+    }
+
+    /* Formulaires */
+    .form-row {
+        margin-bottom: 1rem;
+    }
+
+    .form-row label {
+        font-weight: 600;
+        color: var(--dark-color);
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+
+    .form-row input, .form-row select, .form-row textarea {
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        padding: 0.5rem;
+        width: 100%;
+        transition: border-color 0.3s ease;
+    }
+
+    .form-row input:focus, .form-row select:focus, .form-row textarea:focus {
+        border-color: var(--primary-color);
+        outline: none;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+
+    /* Fieldsets */
+    fieldset {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        padding: 0;
+        background: white;
+    }
+
+    fieldset h2 {
+        background: var(--light-color);
+        color: var(--dark-color);
+        margin: 0;
+        padding: 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    fieldset .form-row {
+        padding: 0 1rem;
+    }
+
+    fieldset .form-row:last-child {
+        padding-bottom: 1rem;
+    }
+
+    /* Actions */
+    .actions {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+    }
+
+    .actions select {
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        padding: 0.5rem;
+        margin-right: 0.5rem;
+    }
+
+    /* Pagination */
+    .paginator {
+        text-align: center;
+        margin: 1rem 0;
+    }
+
+    .paginator a, .paginator .this-page {
+        display: inline-block;
+        padding: 0.5rem 0.75rem;
+        margin: 0 0.25rem;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        text-decoration: none;
+        color: var(--primary-color);
+        transition: all 0.3s ease;
+    }
+
+    .paginator a:hover {
+        background-color: var(--primary-color);
+        color: white;
+    }
+
+    .paginator .this-page {
+        background-color: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+
+    /* Dashboard spécifique */
+    .dashboard .module {
+        height: auto;
+    }
+
+    .dashboard .module table {
+        width: 100%;
+    }
+
+    .dashboard .module th {
+        background: var(--light-color);
+        color: var(--dark-color);
+        font-weight: 600;
+        padding: 0.75rem;
+        border-bottom: 2px solid var(--primary-color);
+    }
+
+    .dashboard .module td {
+        padding: 0.75rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .dashboard .module a {
+        color: var(--primary-color);
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .dashboard .module a:hover {
+        text-decoration: underline;
+        color: #0056b3;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        #content {
+            padding: 1rem 0.5rem;
+        }
+        
+        .module {
+            margin-bottom: 1rem;
+        }
+        
+        #changelist-filter {
+            margin-top: 1rem;
+        }
+        
+        #result_list {
+            font-size: 0.9rem;
+        }
+        
+        #result_list td, #result_list th {
+            padding: 0.5rem 0.25rem;
+        }
+    }
+
+    /* Icônes pour les différents modèles */
+    .model-user::before { content: "👤 "; }
+    .model-event::before { content: "📅 "; }
+    .model-payment::before { content: "💳 "; }
+    .model-subscription::before { content: "📋 "; }
+    .model-notification::before { content: "🔔 "; }
+    .model-contactmessage::before { content: "📧 "; }
+    .model-faq::before { content: "❓ "; }
+</style>
+{% endblock %}
+
+{% block extrajs %}
+{{ block.super }}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Ajouter des classes Bootstrap aux éléments
+    const tables = document.querySelectorAll('table');
+    tables.forEach(table => {
+        table.classList.add('table', 'table-striped', 'table-hover');
+    });
+    
+    // Améliorer les messages
+    const messages = document.querySelectorAll('.messagelist li');
+    messages.forEach(message => {
+        message.classList.add('alert');
+        if (message.classList.contains('success')) {
+            message.classList.add('alert-success');
+        } else if (message.classList.contains('error')) {
+            message.classList.add('alert-danger');
+        } else if (message.classList.contains('warning')) {
+            message.classList.add('alert-warning');
+        } else if (message.classList.contains('info')) {
+            message.classList.add('alert-info');
+        }
+    });
+    
+    // Ajouter des icônes aux liens du dashboard
+    const dashboardLinks = document.querySelectorAll('.dashboard .module a');
+    dashboardLinks.forEach(link => {
+        const href = link.getAttribute('href');
+        if (href) {
+            if (href.includes('user')) {
+                link.classList.add('model-user');
+            } else if (href.includes('event')) {
+                link.classList.add('model-event');
+            } else if (href.includes('payment')) {
+                link.classList.add('model-payment');
+            } else if (href.includes('subscription')) {
+                link.classList.add('model-subscription');
+            } else if (href.includes('notification')) {
+                link.classList.add('model-notification');
+            } else if (href.includes('contactmessage')) {
+                link.classList.add('model-contactmessage');
+            } else if (href.includes('faq')) {
+                link.classList.add('model-faq');
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
+
