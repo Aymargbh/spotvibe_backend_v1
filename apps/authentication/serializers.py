@@ -10,6 +10,10 @@ from django.contrib.auth import authenticate, get_user_model
 from django.core.exceptions import ValidationError
 from .models import SocialAccount, LoginAttempt
 from apps.users.serializers import UserPublicSerializer
+import facebook
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+from django.conf import settings
 
 User = get_user_model()
 
@@ -33,31 +37,42 @@ class SocialAccountSerializer(serializers.ModelSerializer):
 
 
 class GoogleAuthSerializer(serializers.Serializer):
-    """
-    Sérialiseur pour l'authentification Google.
-    """
+    """Sérialiseur pour l'authentification Google."""
     
     access_token = serializers.CharField()
     
     def validate_access_token(self, value):
         """Valide le token d'accès Google."""
-        # Ici, vous devriez valider le token avec l'API Google
-        # Pour l'exemple, nous simulons la validation
-        if not value or len(value) < 10:
-            raise serializers.ValidationError("Token d'accès invalide")
-        return value
+        try:
+            idinfo = id_token.verify_oauth2_token(
+                value,
+                google_requests.Request(),
+                settings.SPOTVIBE_SETTINGS['GOOGLE_OAUTH2_CLIENT_ID']
+            )
+
+            if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                raise serializers.ValidationError("Token émis par un fournisseur non autorisé")
+
+            return value
+        except Exception as e:
+            raise serializers.ValidationError(f"Token Google invalide: {str(e)}")
     
     def create(self, validated_data):
         """Crée ou récupère un utilisateur via Google."""
-        access_token = validated_data['access_token']
+        token = validated_data['access_token']
         
-        # Simuler la récupération des données utilisateur depuis Google
-        # En production, utilisez l'API Google pour récupérer ces informations
+        # Récupérer les infos utilisateur depuis Google
+        idinfo = id_token.verify_oauth2_token(
+            token,
+            google_requests.Request(),
+            settings.SPOTVIBE_SETTINGS['GOOGLE_OAUTH2_CLIENT_ID']
+        )
+        
         google_user_data = {
-            'id': '123456789',
-            'email': 'user@gmail.com',
-            'name': 'John Doe',
-            'picture': 'https://example.com/photo.jpg'
+            'id': idinfo['sub'],
+            'email': idinfo['email'],
+            'name': idinfo.get('name', ''),
+            'picture': idinfo.get('picture', '')
         }
         
         # Chercher ou créer le compte social
@@ -70,7 +85,7 @@ class GoogleAuthSerializer(serializers.Serializer):
                 'photo_url': google_user_data['picture']
             }
         )
-        
+
         # Chercher ou créer l'utilisateur
         if social_account.utilisateur:
             user = social_account.utilisateur
@@ -99,38 +114,39 @@ class GoogleAuthSerializer(serializers.Serializer):
 
 
 class FacebookAuthSerializer(serializers.Serializer):
-    """
-    Sérialiseur pour l'authentification Facebook.
-    """
+    """Sérialiseur pour l'authentification Facebook."""
     
     access_token = serializers.CharField()
     
     def validate_access_token(self, value):
         """Valide le token d'accès Facebook."""
-        if not value or len(value) < 10:
-            raise serializers.ValidationError("Token d'accès invalide")
-        return value
+        try:
+            graph = facebook.GraphAPI(access_token=value, version='3.1')
+            # Vérifie si le token est valide en récupérant les infos utilisateur
+            user_info = graph.get_object('me', fields='id,email,name,picture')
+            return value
+        except Exception as e:
+            raise serializers.ValidationError(f"Token Facebook invalide: {str(e)}")
     
     def create(self, validated_data):
         """Crée ou récupère un utilisateur via Facebook."""
-        access_token = validated_data['access_token']
+        token = validated_data['access_token']
         
-        # Simuler la récupération des données utilisateur depuis Facebook
-        facebook_user_data = {
-            'id': '987654321',
-            'email': 'user@facebook.com',
-            'name': 'Jane Smith',
-            'picture': {'data': {'url': 'https://example.com/photo.jpg'}}
-        }
+        # Récupérer les infos utilisateur depuis Facebook
+        graph = facebook.GraphAPI(access_token=token, version='3.1')
+        facebook_user_data = graph.get_object(
+            'me',
+            fields='id,email,name,picture.type(large)'
+        )
         
         # Chercher ou créer le compte social
         social_account, created = SocialAccount.objects.get_or_create(
             provider='FACEBOOK',
             social_id=facebook_user_data['id'],
             defaults={
-                'email': facebook_user_data['email'],
-                'nom_complet': facebook_user_data['name'],
-                'photo_url': facebook_user_data['picture']['data']['url']
+                'email': facebook_user_data.get('email', ''),
+                'nom_complet': facebook_user_data.get('name', ''),
+                'photo_url': facebook_user_data.get('picture', {}).get('data', {}).get('url', '')
             }
         )
         

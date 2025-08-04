@@ -26,7 +26,7 @@ class User(AbstractUser):
     
     # Validation du numéro de téléphone (format béninois)
     phone_regex = RegexValidator(
-        regex=r'^\+229[0-9]{8}$',
+        regex=r'^\+229[0-9]{10}$',
         message="Le numéro de téléphone doit être au format: '+229XXXXXXXX'."
     )
     
@@ -34,7 +34,7 @@ class User(AbstractUser):
     telephone = models.CharField(
         _('Téléphone'),
         validators=[phone_regex],
-        max_length=13,
+        max_length=15,
         unique=True,
         help_text="Numéro de téléphone au format béninois (+229XXXXXXXX)"
     )

@@ -12,4 +12,7 @@ qrcode[pil]==8.2
 python-decouple==3.8
 coreapi
 drf-yasg
-
+google-auth
+google-auth-oauthlib
+facebook-sdk
+requests

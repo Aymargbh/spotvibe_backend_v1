@@ -308,7 +308,7 @@ SPOTVIBE_SETTINGS = {
     'MAX_EVENTS_UNVERIFIED': 1,
     
     # Durée de validité des codes de vérification (en minutes)
-    'VERIFICATION_CODE_VALIDITY': 15,
+    'VERIFICATION_CODE_VALIDITY': 60,
     
     # Taille maximale des images uploadées (en MB)
     'MAX_IMAGE_SIZE': 5,
