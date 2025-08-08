@@ -15,6 +15,8 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 import uuid
 
+from apps.events.models import EventTicket
+
 User = get_user_model()
 
 
@@ -144,7 +146,7 @@ class Payment(models.Model):
     )
     
     event_ticket = models.ForeignKey(
-        'events.EventTicket',
+        EventTicket,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

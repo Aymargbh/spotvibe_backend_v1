@@ -181,14 +181,6 @@ class AdminAction(models.Model):
             # Index pour les requêtes de contenu générique
             models.Index(fields=['content_type', 'object_id'], name='admin_action_content'),
         ]
-        
-        # Contraintes de base de données
-        constraints = [
-            models.CheckConstraint(
-                check=models.Q(description__length__gte=10),
-                name='admin_action_description_min_length'
-            ),
-        ]
     
     def clean(self):
         """Validation personnalisée du modèle."""

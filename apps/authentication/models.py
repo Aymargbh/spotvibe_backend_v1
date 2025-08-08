@@ -225,9 +225,7 @@ class SocialAccount(models.Model):
         if self.provider not in [choice[0] for choice in self.PROVIDER_CHOICES]:
             raise ValidationError(_("Fournisseur de compte social invalide."))
         
-        # S'assurer que social_id est unique pour le fournisseur
-        if self.social_id and SocialAccount.objects.filter(provider=self.provider, social_id=self.social_id).exclude(pk=self.pk).exists():
-            raise ValidationError(_("Un compte social avec cet ID existe déjà pour ce fournisseur."))
+
 
     @classmethod
     def cleanup_old_inactive_accounts(cls, days=365):
@@ -352,7 +350,7 @@ class LoginAttempt(models.Model):
     
     def __str__(self):
         """Représentation string de la tentative."""
-        return f"{self.email_tente} - {self.statut} - {self.date_tentative.strftime("%d/%m/%Y %H:%M")}"
+        return f"{self.email_tente} - {self.statut} - {self.date_tentative.strftime('%d/%m/%Y %H:%M')}"
     
     @classmethod
     def get_recent_failures(cls, email, minutes=15):
@@ -656,9 +654,9 @@ class EmailVerification(models.Model):
         verbose_name_plural = _("Vérifications d'email")
         ordering = ["-date_creation"]
         indexes = [
-            models.Index(fields=["utilisateur", "email", "statut"], name="email_verification_user_email_status"),
+            models.Index(fields=["utilisateur", "email", "statut"], name="email_verify_user_email_status"),
             models.Index(fields=["code", "statut"], name="email_verification_code_status"),
-            models.Index(fields=["date_expiration", "statut"], name="email_verification_expiry_status"),
+            models.Index(fields=["date_expiration", "statut"], name="email_verify_expiry_status"),
         ]
     
     def __str__(self):

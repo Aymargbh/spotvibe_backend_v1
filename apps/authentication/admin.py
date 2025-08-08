@@ -164,7 +164,7 @@ class TwoFactorAuthAdmin(admin.ModelAdmin):
     """Interface d'administration pour l'authentification 2FA."""
     
     list_display = [
-        'utilisateur', 'actif', 'methode', 'derniere_utilisation',
+        'utilisateur', 'actif', 'methode',
         'date_activation', 'get_recovery_codes_count'
     ]
     
@@ -172,7 +172,7 @@ class TwoFactorAuthAdmin(admin.ModelAdmin):
     search_fields = ['utilisateur__username']
     
     readonly_fields = [
-        'secret_key', 'derniere_utilisation', 'date_activation',
+        'secret_key', 'date_activation',
         'get_recovery_codes_count'
     ]
     
@@ -188,8 +188,8 @@ class TwoFactorAuthAdmin(admin.ModelAdmin):
             'fields': ('codes_recuperation', 'get_recovery_codes_count'),
             'classes': ('collapse',)
         }),
-        (_('Statistiques'), {
-            'fields': ('derniere_utilisation', 'date_activation'),
+        (_("Statistiques"), {
+            'fields': ('date_activation',),
             'classes': ('collapse',)
         }),
     ]

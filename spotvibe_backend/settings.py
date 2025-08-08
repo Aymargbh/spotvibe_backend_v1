@@ -331,7 +331,7 @@ SPOTVIBE_SETTINGS = {
     'FACEBOOK_APP_SECRET': config('FACEBOOK_APP_SECRET', default=''),
 }
 
-SOCIAL_ACCOUNT_ENCRYPTION_KEY = "sN6hYhHkXz4XJ5nQ7v9sDdZaFgRfTjKlMnOpQrStUvY="
+SOCIAL_ACCOUNT_ENCRYPTION_KEY = config("SOCIAL_ACCOUNT_ENCRYPTION_KEY")
 
 # Création du dossier logs s'il n'existe pas
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)

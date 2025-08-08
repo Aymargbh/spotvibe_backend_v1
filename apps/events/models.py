@@ -1039,7 +1039,7 @@ class EventTicket(models.Model):
 
     # Liens
     evenement = models.ForeignKey(
-        'Event',
+        Event,
         on_delete=models.CASCADE,
         related_name='tickets',
         verbose_name=_('Événement'),
@@ -1047,7 +1047,7 @@ class EventTicket(models.Model):
     )
 
     utilisateur = models.ForeignKey(
-        'User',
+        User,
         on_delete=models.CASCADE,
         related_name='tickets',
         verbose_name=_('Utilisateur'),

@@ -181,17 +181,17 @@ class NotificationBatchAdmin(admin.ModelAdmin):
     """Interface d'administration pour les campagnes de notification."""
     
     list_display = [
-        'nom', 'template', 'statut', 'nombre_destinataires',
-        'date_planifiee', 'get_delivery_rate', 'get_read_rate'
+        'nom', 'template', 'statut',
+        'get_nombre_destinataires', 'date_planification', 'get_delivery_rate', 'get_read_rate'
     ]
     
-    list_filter = ['statut', 'date_planifiee', 'date_creation']
+    list_filter = ['statut', 'date_planification', 'date_debut_envoi']
     search_fields = ['nom', 'description']
     
     readonly_fields = [
-        'nombre_destinataires', 'nombre_envoyes', 'nombre_livres',
-        'nombre_lus', 'date_debut_envoi', 'date_fin_envoi',
-        'get_delivery_rate', 'get_read_rate'
+        'date_debut_envoi', 'date_fin_envoi',
+        'get_nombre_destinataires', 'get_nombre_envoyes', 'get_nombre_livres',
+        'get_nombre_lus', 'get_delivery_rate', 'get_read_rate'
     ]
     
     fieldsets = [
@@ -202,13 +202,13 @@ class NotificationBatchAdmin(admin.ModelAdmin):
             'fields': ('destinataires', 'criteres_ciblage'),
             'classes': ('collapse',)
         }),
-        (_('Planification'), {
-            'fields': ('date_planifiee', 'statut')
+        (_("Planification"), {
+            "fields": ("date_planification", "statut")
         }),
         (_('Résultats'), {
             'fields': (
-                'nombre_destinataires', 'nombre_envoyes', 'nombre_livres',
-                'nombre_lus', 'get_delivery_rate', 'get_read_rate'
+                'get_nombre_destinataires', 'get_nombre_envoyes', 'get_nombre_livres',
+                'get_nombre_lus', 'get_delivery_rate', 'get_read_rate'
             ),
             'classes': ('collapse',)
         }),
@@ -227,6 +227,21 @@ class NotificationBatchAdmin(admin.ModelAdmin):
     def get_read_rate(self, obj):
         """Affiche le taux de lecture."""
         rate = obj.get_read_rate()
-        return format_html('{:.1f}%', rate)
-    get_read_rate.short_description = _('Taux de lecture')
+        return format_html("{:.1f}%", rate)
+    get_read_rate.short_description = _("Taux de lecture")
 
+    def get_nombre_destinataires(self, obj):
+        return obj.nombre_destinataires
+    get_nombre_destinataires.short_description = _("Destinataires")
+
+    def get_nombre_envoyes(self, obj):
+        return obj.nombre_envoyes
+    get_nombre_envoyes.short_description = _("Envoyés")
+
+    def get_nombre_livres(self, obj):
+        return obj.nombre_livres
+    get_nombre_livres.short_description = _("Livrés")
+
+    def get_nombre_lus(self, obj):
+        return obj.nombre_lus
+    get_nombre_lus.short_description = _("Lus")

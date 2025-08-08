@@ -6,7 +6,6 @@
 {% block branding %}
 <div class="d-flex align-items-center">
     <h1 id="site-name" class="text-primary mb-0">
-        <i class="fas fa-calendar-alt me-2"></i>
         <a href="{% url 'admin:index' %}" class="text-decoration-none text-primary">
             SpotVibe Administration
         </a>
@@ -395,15 +394,6 @@
             padding: 0.5rem 0.25rem;
         }
     }
-
-    /* Icônes pour les différents modèles */
-    .model-user::before { content: "👤 "; }
-    .model-event::before { content: "📅 "; }
-    .model-payment::before { content: "💳 "; }
-    .model-subscription::before { content: "📋 "; }
-    .model-notification::before { content: "🔔 "; }
-    .model-contactmessage::before { content: "📧 "; }
-    .model-faq::before { content: "❓ "; }
 </style>
 {% endblock %}
 

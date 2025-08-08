@@ -60,7 +60,7 @@ class GoogleAuthView(generics.CreateAPIView):
                 utilisateur=user,
                 adresse_ip=self.get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                reussi=True
+                statut="REUSSI"
             )
             
             return Response({
@@ -114,7 +114,7 @@ class FacebookAuthView(generics.CreateAPIView):
                 utilisateur=user,
                 adresse_ip=self.get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                reussi=True
+                statut="REUSSI"
             )
             
             return Response({

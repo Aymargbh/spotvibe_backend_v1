@@ -316,7 +316,7 @@ class AuditLog(models.Model):
     def __str__(self):
         """Représentation string du log."""
         user_str = self.utilisateur.username if self.utilisateur else "Système"
-        return f"{user_str} - {self.action} - {self.date_action.strftime("%d/%m/%Y %H:%M")}"
+        return f"{user_str} - {self.action} - {self.date_action.strftime('%d/%m/%Y %H:%M')}"
 
     @classmethod
     def cleanup_old_logs(cls, days=365):
