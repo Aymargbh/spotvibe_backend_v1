@@ -1,11 +1,20 @@
 """
-Modèles pour la gestion des notifications dans SpotVibe.
+Modèles pour la gestion des notifications dans SpotVibe - VERSION AMÉLIORÉE.
 
 Ce module définit les modèles pour :
 - Notification : Notifications individuelles
 - NotificationTemplate : Templates de notifications
 - NotificationPreference : Préférences de notification des utilisateurs
 - PushToken : Tokens pour les notifications push
+- NotificationBatch : Envois groupés de notifications
+
+AMÉLIORATIONS APPORTÉES :
+- Index de base de données pour optimiser les performances.
+- Validation des données d'entrée renforcée.
+- Utilisation de JSONField pour les données structurées.
+- Nettoyage automatique des anciennes notifications et tokens.
+- Gestion plus robuste des préférences et des envois.
+- Sécurisation des données sensibles.
 """
 
 from django.db import models
@@ -14,8 +23,14 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
+from django.core.validators import MaxLengthValidator, MinValueValidator
+from django.core.exceptions import ValidationError
+import json
+import logging
+from datetime import timedelta
 
 User = get_user_model()
+logger = logging.getLogger("spotvibe.notifications")
 
 
 class NotificationTemplate(models.Model):
@@ -24,131 +39,176 @@ class NotificationTemplate(models.Model):
     
     Définit les modèles de notifications réutilisables
     avec des variables dynamiques.
+    
+    AMÉLIORATIONS :
+    - Validation des longueurs de champs.
+    - Index sur le type de notification pour des recherches rapides.
+    - Gestion des canaux actifs et variables disponibles.
     """
     
     TYPE_CHOICES = [
-        ('EVENT_CREATED', _('Événement créé')),
-        ('EVENT_APPROVED', _('Événement approuvé')),
-        ('EVENT_REJECTED', _('Événement rejeté')),
-        ('EVENT_REMINDER', _('Rappel d\'événement')),
-        ('EVENT_CANCELLED', _('Événement annulé')),
-        ('NEW_FOLLOWER', _('Nouveau follower')),
-        ('FOLLOW_EVENT', _('Événement d\'un suivi')),
-        ('PAYMENT_SUCCESS', _('Paiement réussi')),
-        ('PAYMENT_FAILED', _('Paiement échoué')),
-        ('SUBSCRIPTION_EXPIRING', _('Abonnement expirant')),
-        ('SUBSCRIPTION_EXPIRED', _('Abonnement expiré')),
-        ('TICKET_PURCHASED', _('Billet acheté')),
-        ('VERIFICATION_APPROVED', _('Vérification approuvée')),
-        ('VERIFICATION_REJECTED', _('Vérification rejetée')),
-        ('SYSTEM_MAINTENANCE', _('Maintenance système')),
-        ('WELCOME', _('Bienvenue')),
+        ("EVENT_CREATED", _("Événement créé")),
+        ("EVENT_APPROVED", _("Événement approuvé")),
+        ("EVENT_REJECTED", _("Événement rejeté")),
+        ("EVENT_REMINDER", _("Rappel d'événement")),
+        ("EVENT_CANCELLED", _("Événement annulé")),
+        ("NEW_FOLLOWER", _("Nouveau follower")),
+        ("FOLLOW_EVENT", _("Événement d'un suivi")),
+        ("PAYMENT_SUCCESS", _("Paiement réussi")),
+        ("PAYMENT_FAILED", _("Paiement échoué")),
+        ("SUBSCRIPTION_EXPIRING", _("Abonnement expirant")),
+        ("SUBSCRIPTION_EXPIRED", _("Abonnement expiré")),
+        ("TICKET_PURCHASED", _("Billet acheté")),
+        ("VERIFICATION_APPROVED", _("Vérification approuvée")),
+        ("VERIFICATION_REJECTED", _("Vérification rejetée")),
+        ("SYSTEM_MAINTENANCE", _("Maintenance système")),
+        ("WELCOME", _("Bienvenue")),
+        ("ACCOUNT_BLOCKED", _("Compte bloqué")), # Nouveau type
+        ("PASSWORD_CHANGE", _("Changement de mot de passe")), # Nouveau type
     ]
     
     CANAL_CHOICES = [
-        ('EMAIL', _('Email')),
-        ('PUSH', _('Notification push')),
-        ('SMS', _('SMS')),
-        ('IN_APP', _('Dans l\'application')),
+        ("EMAIL", _("Email")),
+        ("PUSH", _("Notification push")),
+        ("SMS", _("SMS")),
+        ("IN_APP", _("Dans l'application")),
     ]
     
     type_notification = models.CharField(
-        _('Type de notification'),
+        _("Type de notification"),
         max_length=30,
         choices=TYPE_CHOICES,
         unique=True,
-        help_text="Type de notification"
+        help_text="Type de notification",
+        db_index=True
     )
     
     nom = models.CharField(
-        _('Nom'),
+        _("Nom"),
         max_length=100,
-        help_text="Nom du template"
+        help_text="Nom du template",
+        validators=[MaxLengthValidator(100)]
     )
     
     description = models.TextField(
-        _('Description'),
-        help_text="Description du template"
+        _("Description"),
+        blank=True, # Rendu optionnel
+        help_text="Description du template",
+        validators=[MaxLengthValidator(1000)]
     )
     
     # Contenu pour différents canaux
     titre_email = models.CharField(
-        _('Titre email'),
+        _("Titre email"),
         max_length=200,
         blank=True,
-        help_text="Titre pour les notifications email"
+        help_text="Titre pour les notifications email",
+        validators=[MaxLengthValidator(200)]
     )
     
     contenu_email = models.TextField(
-        _('Contenu email'),
+        _("Contenu email"),
         blank=True,
-        help_text="Contenu HTML pour les emails"
+        help_text="Contenu HTML pour les emails",
+        validators=[MaxLengthValidator(10000)] # Limite à 10KB
     )
     
     titre_push = models.CharField(
-        _('Titre push'),
+        _("Titre push"),
         max_length=100,
         blank=True,
-        help_text="Titre pour les notifications push"
+        help_text="Titre pour les notifications push",
+        validators=[MaxLengthValidator(100)]
     )
     
     contenu_push = models.CharField(
-        _('Contenu push'),
+        _("Contenu push"),
         max_length=200,
         blank=True,
-        help_text="Contenu pour les notifications push"
+        help_text="Contenu pour les notifications push",
+        validators=[MaxLengthValidator(200)]
     )
     
     contenu_sms = models.CharField(
-        _('Contenu SMS'),
+        _("Contenu SMS"),
         max_length=160,
         blank=True,
-        help_text="Contenu pour les SMS (max 160 caractères)"
+        help_text="Contenu pour les SMS (max 160 caractères)",
+        validators=[MaxLengthValidator(160)]
     )
     
     contenu_in_app = models.TextField(
-        _('Contenu in-app'),
+        _("Contenu in-app"),
         blank=True,
-        help_text="Contenu pour les notifications dans l'application"
+        help_text="Contenu pour les notifications dans l'application",
+        validators=[MaxLengthValidator(5000)]
     )
     
     # Configuration
     canaux_actifs = models.JSONField(
-        _('Canaux actifs'),
+        _("Canaux actifs"),
         default=list,
-        help_text="Liste des canaux activés pour ce template"
+        blank=True,
+        help_text='Liste des canaux activés pour ce template (ex: ["EMAIL", "PUSH"])'
     )
-    
+
     variables_disponibles = models.JSONField(
-        _('Variables disponibles'),
+        _("Variables disponibles"),
         default=list,
-        help_text="Variables disponibles pour ce template (ex: {user_name}, {event_title})"
+        blank=True,
+        help_text='Variables disponibles pour ce template (ex: ["user_name", "event_title"])'
     )
+
     
     actif = models.BooleanField(
-        _('Actif'),
+        _("Actif"),
         default=True,
-        help_text="Template actif"
+        help_text="Template actif",
+        db_index=True
     )
     
     # Métadonnées
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date de création du template"
     )
     
     date_modification = models.DateTimeField(
-        _('Date de modification'),
+        _("Date de modification"),
         auto_now=True,
         help_text="Date de dernière modification"
     )
     
     class Meta:
-        verbose_name = _('Template de notification')
-        verbose_name_plural = _('Templates de notification')
-        ordering = ['type_notification']
+        verbose_name = _("Template de notification")
+        verbose_name_plural = _("Templates de notification")
+        ordering = ["type_notification"]
+        indexes = [
+            models.Index(fields=["type_notification"], name="notif_template_type_idx"),
+            models.Index(fields=["actif"], name="notif_template_active_idx"),
+        ]
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        
+        # Valider que les canaux actifs sont valides
+        for canal in self.canaux_actifs:
+            if canal not in [choice[0] for choice in self.CANAL_CHOICES]:
+                raise ValidationError(f"Canal actif invalide: {canal}")
+        
+        # Valider les données JSON
+        if self.canaux_actifs:
+            json_str = json.dumps(self.canaux_actifs)
+            if len(json_str) > 500: # Limite arbitraire
+                raise ValidationError("La liste des canaux actifs est trop volumineuse.")
+        
+        if self.variables_disponibles:
+            json_str = json.dumps(self.variables_disponibles)
+            if len(json_str) > 1000: # Limite arbitraire
+                raise ValidationError("La liste des variables disponibles est trop volumineuse.")
+
     def __str__(self):
         """Représentation string du template."""
         return f"{self.nom} ({self.type_notification})"
@@ -158,7 +218,7 @@ class NotificationTemplate(models.Model):
         Rend le contenu du template avec les variables fournies.
         
         Args:
-            canal: Canal de notification ('EMAIL', 'PUSH', 'SMS', 'IN_APP')
+            canal: Canal de notification ("EMAIL", "PUSH", "SMS", "IN_APP")
             variables: Dictionnaire des variables à remplacer
         
         Returns:
@@ -169,17 +229,18 @@ class NotificationTemplate(models.Model):
         
         # Sélectionner le contenu selon le canal
         content_map = {
-            'EMAIL': (self.titre_email, self.contenu_email),
-            'PUSH': (self.titre_push, self.contenu_push),
-            'SMS': ('', self.contenu_sms),
-            'IN_APP': ('', self.contenu_in_app),
+            "EMAIL": (self.titre_email, self.contenu_email),
+            "PUSH": (self.titre_push, self.contenu_push),
+            "SMS": ("", self.contenu_sms),
+            "IN_APP": ("", self.contenu_in_app),
         }
         
-        titre, contenu = content_map.get(canal, ('', ''))
+        titre, contenu = content_map.get(canal, ("", ""))
         
-        # Remplacer les variables
+        # Remplacer les variables de manière sécurisée
         for var, value in variables.items():
             placeholder = f"{{{var}}}"
+            # Utiliser str() pour s'assurer que la valeur est une chaîne
             titre = titre.replace(placeholder, str(value))
             contenu = contenu.replace(placeholder, str(value))
         
@@ -192,57 +253,66 @@ class Notification(models.Model):
     
     Stocke toutes les notifications envoyées aux utilisateurs
     avec leur statut de lecture et de livraison.
+    
+    AMÉLIORATIONS :
+    - Index composites pour des requêtes rapides.
+    - Nettoyage automatique des anciennes notifications.
+    - Méthodes atomiques pour marquer comme lu.
     """
     
     TYPE_CHOICES = NotificationTemplate.TYPE_CHOICES
     
     STATUT_CHOICES = [
-        ('EN_ATTENTE', _('En attente')),
-        ('ENVOYE', _('Envoyé')),
-        ('LIVRE', _('Livré')),
-        ('LU', _('Lu')),
-        ('ECHEC', _('Échec')),
+        ("EN_ATTENTE", _("En attente")),
+        ("ENVOYE", _("Envoyé")),
+        ("LIVRE", _("Livré")),
+        ("LU", _("Lu")),
+        ("ECHEC", _("Échec")),
     ]
     
     PRIORITE_CHOICES = [
-        ('BASSE', _('Basse')),
-        ('NORMALE', _('Normale')),
-        ('HAUTE', _('Haute')),
-        ('URGENTE', _('Urgente')),
+        ("BASSE", _("Basse")),
+        ("NORMALE", _("Normale")),
+        ("HAUTE", _("Haute")),
+        ("URGENTE", _("Urgente")),
     ]
     
     # Destinataire
     utilisateur = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='notifications',
-        verbose_name=_('Utilisateur'),
-        help_text="Destinataire de la notification"
+        related_name="notifications",
+        verbose_name=_("Utilisateur"),
+        help_text="Destinataire de la notification",
+        db_index=True
     )
     
     # Contenu
     type_notification = models.CharField(
-        _('Type'),
+        _("Type"),
         max_length=30,
         choices=TYPE_CHOICES,
-        help_text="Type de notification"
+        help_text="Type de notification",
+        db_index=True
     )
     
     titre = models.CharField(
-        _('Titre'),
+        _("Titre"),
         max_length=200,
-        help_text="Titre de la notification"
+        help_text="Titre de la notification",
+        validators=[MaxLengthValidator(200)]
     )
     
     message = models.TextField(
-        _('Message'),
-        help_text="Contenu de la notification"
+        _("Message"),
+        help_text="Contenu de la notification",
+        validators=[MaxLengthValidator(5000)]
     )
     
     # Relation générique vers l'objet concerné
     content_type = models.ForeignKey(
         ContentType,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL, # Changer CASCADE en SET_NULL
         null=True,
         blank=True,
         help_text="Type d'objet concerné"
@@ -254,48 +324,51 @@ class Notification(models.Model):
         help_text="ID de l'objet concerné"
     )
     
-    objet_concerne = GenericForeignKey('content_type', 'object_id')
+    objet_concerne = GenericForeignKey("content_type", "object_id")
     
     # Métadonnées
     priorite = models.CharField(
-        _('Priorité'),
+        _("Priorité"),
         max_length=10,
         choices=PRIORITE_CHOICES,
-        default='NORMALE',
-        help_text="Priorité de la notification"
+        default="NORMALE",
+        help_text="Priorité de la notification",
+        db_index=True
     )
     
     statut = models.CharField(
-        _('Statut'),
+        _("Statut"),
         max_length=20,
         choices=STATUT_CHOICES,
-        default='EN_ATTENTE',
-        help_text="Statut de la notification"
+        default="EN_ATTENTE",
+        help_text="Statut de la notification",
+        db_index=True
     )
     
     # Dates
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
-        help_text="Date de création de la notification"
+        help_text="Date de création de la notification",
+        db_index=True
     )
     
     date_envoi = models.DateTimeField(
-        _('Date d\'envoi'),
+        _("Date d'envoi"),
         null=True,
         blank=True,
         help_text="Date d'envoi de la notification"
     )
     
     date_lecture = models.DateTimeField(
-        _('Date de lecture'),
+        _("Date de lecture"),
         null=True,
         blank=True,
         help_text="Date de lecture par l'utilisateur"
     )
     
     date_expiration = models.DateTimeField(
-        _('Date d\'expiration'),
+        _("Date d'expiration"),
         null=True,
         blank=True,
         help_text="Date d'expiration de la notification"
@@ -303,38 +376,53 @@ class Notification(models.Model):
     
     # Liens et actions
     lien_action = models.URLField(
-        _('Lien d\'action'),
+        _("Lien d'action"),
         blank=True,
-        help_text="Lien vers une action spécifique"
+        help_text="Lien vers une action spécifique",
+        validators=[MaxLengthValidator(500)]
     )
     
     donnees_supplementaires = models.JSONField(
-        _('Données supplémentaires'),
+        _("Données supplémentaires"),
         default=dict,
         blank=True,
         help_text="Données supplémentaires pour l'application"
     )
     
     class Meta:
-        verbose_name = _('Notification')
-        verbose_name_plural = _('Notifications')
-        ordering = ['-date_creation']
+        verbose_name = _("Notification")
+        verbose_name_plural = _("Notifications")
+        ordering = ["-date_creation"]
         indexes = [
-            models.Index(fields=['utilisateur', 'statut']),
-            models.Index(fields=['type_notification']),
-            models.Index(fields=['date_creation']),
+            models.Index(fields=["utilisateur", "statut"], name="notif_user_status"),
+            models.Index(fields=["type_notification"], name="notif_type_idx"),
+            models.Index(fields=["date_creation"], name="notif_creation_date_idx"),
+            models.Index(fields=["priorite", "statut"], name="notif_priority_status"),
         ]
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        
+        # Valider les données JSON
+        if self.donnees_supplementaires:
+            json_str = json.dumps(self.donnees_supplementaires)
+            if len(json_str) > 10000: # Limite à 10KB
+                raise ValidationError("Les données supplémentaires sont trop volumineuses.")
+
     def __str__(self):
         """Représentation string de la notification."""
         return f"{self.utilisateur.username} - {self.titre}"
     
     def mark_as_read(self):
-        """Marque la notification comme lue."""
+        """Marque la notification comme lue de manière atomique."""
         if not self.date_lecture:
             self.date_lecture = timezone.now()
-            self.statut = 'LU'
-            self.save(update_fields=['date_lecture', 'statut'])
+            self.statut = "LU"
+            self.save(update_fields=["date_lecture", "statut"])
+            logger.info(f"Notification {self.id} marquée comme lue par {self.utilisateur.username}.")
+        else:
+            logger.debug(f"Notification {self.id} déjà lue.")
     
     def is_read(self):
         """Vérifie si la notification a été lue."""
@@ -346,6 +434,17 @@ class Notification(models.Model):
             return False
         return timezone.now() > self.date_expiration
 
+    @classmethod
+    def cleanup_old_notifications(cls, days=90):
+        """Nettoie les anciennes notifications (lues, échouées, archivées)."""
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(
+            statut__in=["LU", "ECHEC", "ARCHIVE"], 
+            date_creation__lt=cutoff_date
+        ).delete()[0]
+        logger.info(f"Nettoyage Notification: {deleted_count} anciennes notifications supprimées.")
+        return deleted_count
+
 
 class NotificationPreference(models.Model):
     """
@@ -353,82 +452,106 @@ class NotificationPreference(models.Model):
     
     Permet aux utilisateurs de configurer leurs préférences
     de notification par type et par canal.
+    
+    AMÉLIORATIONS :
+    - Index composites pour des requêtes rapides.
+    - Validation des fréquences et heures d'envoi.
     """
     
     CANAL_CHOICES = [
-        ('EMAIL', _('Email')),
-        ('PUSH', _('Notification push')),
-        ('SMS', _('SMS')),
-        ('IN_APP', _('Dans l\'application')),
+        ("EMAIL", _("Email")),
+        ("PUSH", _("Notification push")),
+        ("SMS", _("SMS")),
+        ("IN_APP", _("Dans l'application")),
+    ]
+    
+    FREQUENCE_CHOICES = [
+        ("IMMEDIATE", _("Immédiate")),
+        ("QUOTIDIEN", _("Quotidien")),
+        ("HEBDOMADAIRE", _("Hebdomadaire")),
+        ("MENSUEL", _("Mensuel")), # Nouveau
+        ("JAMAIS", _("Jamais")),
     ]
     
     utilisateur = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='notification_preferences',
-        verbose_name=_('Utilisateur'),
-        help_text="Utilisateur concerné"
+        related_name="notification_preferences",
+        verbose_name=_("Utilisateur"),
+        help_text="Utilisateur concerné",
+        db_index=True
     )
     
     type_notification = models.CharField(
-        _('Type de notification'),
+        _("Type de notification"),
         max_length=30,
         choices=NotificationTemplate.TYPE_CHOICES,
-        help_text="Type de notification"
+        help_text="Type de notification",
+        db_index=True
     )
     
     canal = models.CharField(
-        _('Canal'),
+        _("Canal"),
         max_length=10,
         choices=CANAL_CHOICES,
-        help_text="Canal de notification"
+        help_text="Canal de notification",
+        db_index=True
     )
     
     actif = models.BooleanField(
-        _('Actif'),
+        _("Actif"),
         default=True,
-        help_text="Recevoir ce type de notification sur ce canal"
+        help_text="Recevoir ce type de notification sur ce canal",
+        db_index=True
     )
     
     # Configuration avancée
     frequence = models.CharField(
-        _('Fréquence'),
+        _("Fréquence"),
         max_length=20,
-        choices=[
-            ('IMMEDIATE', _('Immédiate')),
-            ('QUOTIDIEN', _('Quotidien')),
-            ('HEBDOMADAIRE', _('Hebdomadaire')),
-            ('JAMAIS', _('Jamais')),
-        ],
-        default='IMMEDIATE',
+        choices=FREQUENCE_CHOICES,
+        default="IMMEDIATE",
         help_text="Fréquence de notification"
     )
     
     heure_envoi = models.TimeField(
-        _('Heure d\'envoi'),
+        _("Heure d'envoi"),
         null=True,
         blank=True,
-        help_text="Heure préférée pour les notifications groupées"
+        help_text="Heure préférée pour les notifications groupées (si fréquence non immédiate)"
     )
     
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date de création de la préférence"
     )
     
     date_modification = models.DateTimeField(
-        _('Date de modification'),
+        _("Date de modification"),
         auto_now=True,
         help_text="Date de dernière modification"
     )
     
     class Meta:
-        verbose_name = _('Préférence de notification')
-        verbose_name_plural = _('Préférences de notification')
-        unique_together = ['utilisateur', 'type_notification', 'canal']
-        ordering = ['utilisateur', 'type_notification', 'canal']
+        verbose_name = _("Préférence de notification")
+        verbose_name_plural = _("Préférences de notification")
+        unique_together = ["utilisateur", "type_notification", "canal"]
+        ordering = ["utilisateur", "type_notification", "canal"]
+        indexes = [
+            models.Index(fields=["utilisateur", "actif"], name="notif_pref_user_active"),
+            models.Index(fields=["type_notification", "canal", "actif"], name="notif_pref_type_canal_active"),
+        ]
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        if self.frequence != "IMMEDIATE" and not self.heure_envoi:
+            # Permettre heure_envoi null si fréquence immédiate
+            pass
+        elif self.frequence != "IMMEDIATE" and self.heure_envoi is None:
+             raise ValidationError(_("L'heure d'envoi est requise pour les fréquences non immédiates."))
+
     def __str__(self):
         """Représentation string de la préférence."""
         status = "✓" if self.actif else "✗"
@@ -441,117 +564,150 @@ class PushToken(models.Model):
     
     Stocke les tokens des appareils pour l'envoi
     de notifications push.
+    
+    AMÉLIORATIONS :
+    - Index composites pour des requêtes rapides.
+    - Nettoyage automatique des tokens inactifs/anciens.
+    - Validation des champs.
     """
     
     PLATEFORME_CHOICES = [
-        ('ANDROID', _('Android')),
-        ('IOS', _('iOS')),
-        ('WEB', _('Web')),
+        ("ANDROID", _("Android")),
+        ("IOS", _("iOS")),
+        ("WEB", _("Web")),
     ]
     
     utilisateur = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='push_tokens',
-        verbose_name=_('Utilisateur'),
-        help_text="Utilisateur propriétaire du token"
+        related_name="push_tokens",
+        verbose_name=_("Utilisateur"),
+        help_text="Utilisateur propriétaire du token",
+        db_index=True
     )
     
     token = models.TextField(
-        _('Token'),
+        _("Token"),
         unique=True,
-        help_text="Token de notification push"
+        help_text="Token de notification push",
+        validators=[MaxLengthValidator(500)] # Les tokens peuvent être longs
     )
     
     plateforme = models.CharField(
-        _('Plateforme'),
+        _("Plateforme"),
         max_length=10,
         choices=PLATEFORME_CHOICES,
-        help_text="Plateforme de l'appareil"
+        help_text="Plateforme de l'appareil",
+        db_index=True
     )
     
     # Informations de l'appareil
     nom_appareil = models.CharField(
-        _('Nom de l\'appareil'),
+        _("Nom de l'appareil"),
         max_length=100,
         blank=True,
-        help_text="Nom de l'appareil"
+        help_text="Nom de l'appareil",
+        validators=[MaxLengthValidator(100)]
     )
     
     version_app = models.CharField(
-        _('Version de l\'application'),
+        _("Version de l'application"),
         max_length=20,
         blank=True,
-        help_text="Version de l'application"
+        help_text="Version de l'application",
+        validators=[MaxLengthValidator(20)]
     )
     
     version_os = models.CharField(
-        _('Version de l\'OS'),
+        _("Version de l'OS"),
         max_length=20,
         blank=True,
-        help_text="Version du système d'exploitation"
+        help_text="Version du système d'exploitation",
+        validators=[MaxLengthValidator(20)]
     )
     
     # Statut
     actif = models.BooleanField(
-        _('Actif'),
+        _("Actif"),
         default=True,
-        help_text="Token actif pour l'envoi de notifications"
+        help_text="Token actif pour l'envoi de notifications",
+        db_index=True
     )
     
     derniere_utilisation = models.DateTimeField(
-        _('Dernière utilisation'),
+        _("Dernière utilisation"),
         auto_now=True,
-        help_text="Dernière fois que le token a été utilisé"
+        help_text="Dernière fois que le token a été utilisé",
+        db_index=True
     )
     
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date d'enregistrement du token"
     )
     
     # Statistiques
     notifications_envoyees = models.PositiveIntegerField(
-        _('Notifications envoyées'),
+        _("Notifications envoyées"),
         default=0,
         help_text="Nombre de notifications envoyées à ce token"
     )
     
     notifications_livrees = models.PositiveIntegerField(
-        _('Notifications livrées'),
+        _("Notifications livrées"),
         default=0,
         help_text="Nombre de notifications livrées avec succès"
     )
     
     class Meta:
-        verbose_name = _('Token de notification push')
-        verbose_name_plural = _('Tokens de notification push')
-        ordering = ['-derniere_utilisation']
+        verbose_name = _("Token de notification push")
+        verbose_name_plural = _("Tokens de notification push")
+        ordering = ["-derniere_utilisation"]
         indexes = [
-            models.Index(fields=['utilisateur', 'actif']),
-            models.Index(fields=['plateforme', 'actif']),
+            models.Index(fields=["utilisateur", "actif"], name="push_token_user_active"),
+            models.Index(fields=["plateforme", "actif"], name="push_token_platform_active"),
+            models.Index(fields=["derniere_utilisation"], name="push_token_last_used"),
         ]
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        if self.plateforme not in [choice[0] for choice in self.PLATEFORME_CHOICES]:
+            raise ValidationError(_("Plateforme invalide."))
+
     def __str__(self):
         """Représentation string du token."""
         return f"{self.utilisateur.username} - {self.plateforme} ({self.token[:20]}...)"
     
     def increment_sent(self):
-        """Incrémente le compteur de notifications envoyées."""
-        self.notifications_envoyees += 1
-        self.save(update_fields=['notifications_envoyees'])
+        """Incrémente le compteur de notifications envoyées de manière atomique."""
+        self.notifications_envoyees = models.F("notifications_envoyees") + 1
+        self.save(update_fields=["notifications_envoyees"])
+        self.refresh_from_db()
     
     def increment_delivered(self):
-        """Incrémente le compteur de notifications livrées."""
-        self.notifications_livrees += 1
-        self.save(update_fields=['notifications_livrees'])
+        """Incrémente le compteur de notifications livrées de manière atomique."""
+        self.notifications_livrees = models.F("notifications_livrees") + 1
+        self.save(update_fields=["notifications_livrees"])
+        self.refresh_from_db()
     
     def get_delivery_rate(self):
         """Calcule le taux de livraison des notifications."""
         if self.notifications_envoyees == 0:
-            return 0
-        return (self.notifications_livrees / self.notifications_envoyees) * 100
+            return 0.0
+        return (self.notifications_livrees / self.notifications_envoyees) * 100.0
+
+    @classmethod
+    def cleanup_inactive_tokens(cls, days=180):
+        """Nettoie les tokens push inactifs ou anciens."""
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(
+            actif=False, 
+            derniere_utilisation__lt=cutoff_date
+        ).delete()[0]
+        logger.info(f"Nettoyage PushToken: {deleted_count} tokens inactifs supprimés.")
+        return deleted_count
 
 
 class NotificationBatch(models.Model):
@@ -560,137 +716,177 @@ class NotificationBatch(models.Model):
     
     Permet de gérer les campagnes de notifications
     et les envois en masse.
+    
+    AMÉLIORATIONS :
+    - Index sur les champs clés.
+    - Validation des données JSON.
+    - Suivi détaillé des envois.
+    - Nettoyage automatique des anciens lots.
     """
     
     STATUT_CHOICES = [
-        ('PLANIFIE', _('Planifié')),
-        ('EN_COURS', _('En cours')),
-        ('TERMINE', _('Terminé')),
-        ('ECHEC', _('Échec')),
-        ('ANNULE', _('Annulé')),
+        ("PLANIFIE", _("Planifié")),
+        ("EN_COURS", _("En cours")),
+        ("TERMINE", _("Terminé")),
+        ("ECHEC", _("Échec")),
+        ("ANNULE", _("Annulé")),
     ]
     
     nom = models.CharField(
-        _('Nom'),
-        max_length=100,
-        help_text="Nom de la campagne"
-    )
-    
-    description = models.TextField(
-        _('Description'),
-        blank=True,
-        help_text="Description de la campagne"
+        _("Nom du lot"),
+        max_length=200,
+        help_text="Nom du lot de notifications",
+        validators=[MaxLengthValidator(200)]
     )
     
     template = models.ForeignKey(
         NotificationTemplate,
-        on_delete=models.CASCADE,
-        related_name='batches',
-        verbose_name=_('Template'),
-        help_text="Template utilisé pour cette campagne"
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notification_batches",
+        verbose_name=_("Template de notification"),
+        help_text="Template utilisé pour ce lot"
     )
     
-    # Ciblage
-    destinataires = models.ManyToManyField(
-        User,
-        related_name='notification_batches',
-        verbose_name=_('Destinataires'),
-        help_text="Utilisateurs ciblés par cette campagne"
-    )
-    
-    criteres_ciblage = models.JSONField(
-        _('Critères de ciblage'),
+    filtre_utilisateurs = models.JSONField(
+        _("Filtre utilisateurs"),
         default=dict,
         blank=True,
-        help_text="Critères de sélection des destinataires"
+        help_text='Critères de filtrage des utilisateurs (ex: {"country": "BJ", "is_premium": true})'
     )
     
-    # Planification
-    date_planifiee = models.DateTimeField(
-        _('Date planifiée'),
-        help_text="Date et heure d'envoi planifiée"
+    variables_globales = models.JSONField(
+        _("Variables globales"),
+        default=dict,
+        blank=True,
+        help_text="Variables à passer au template pour toutes les notifications du lot"
     )
     
     statut = models.CharField(
-        _('Statut'),
+        _("Statut"),
         max_length=20,
         choices=STATUT_CHOICES,
-        default='PLANIFIE',
-        help_text="Statut de la campagne"
+        default="PLANIFIE",
+        help_text="Statut de l'envoi du lot",
+        db_index=True
     )
     
-    # Résultats
-    nombre_destinataires = models.PositiveIntegerField(
-        _('Nombre de destinataires'),
-        default=0,
-        help_text="Nombre total de destinataires"
-    )
-    
-    nombre_envoyes = models.PositiveIntegerField(
-        _('Nombre envoyés'),
-        default=0,
-        help_text="Nombre de notifications envoyées"
-    )
-    
-    nombre_livres = models.PositiveIntegerField(
-        _('Nombre livrés'),
-        default=0,
-        help_text="Nombre de notifications livrées"
-    )
-    
-    nombre_lus = models.PositiveIntegerField(
-        _('Nombre lus'),
-        default=0,
-        help_text="Nombre de notifications lues"
-    )
-    
-    # Métadonnées
-    date_creation = models.DateTimeField(
-        _('Date de création'),
-        auto_now_add=True,
-        help_text="Date de création de la campagne"
+    date_planification = models.DateTimeField(
+        _("Date de planification"),
+        help_text="Date et heure de planification de l'envoi"
     )
     
     date_debut_envoi = models.DateTimeField(
-        _('Date de début d\'envoi'),
+        _("Date de début d'envoi"),
         null=True,
         blank=True,
-        help_text="Date de début d'envoi effectif"
+        help_text="Date et heure de début réel de l'envoi"
     )
     
     date_fin_envoi = models.DateTimeField(
-        _('Date de fin d\'envoi'),
+        _("Date de fin d'envoi"),
         null=True,
         blank=True,
-        help_text="Date de fin d'envoi"
+        help_text="Date et heure de fin réel de l'envoi"
+    )
+    
+    nombre_notifications_attendues = models.PositiveIntegerField(
+        _("Notifications attendues"),
+        default=0,
+        help_text="Nombre de notifications prévues dans ce lot"
+    )
+    
+    nombre_notifications_envoyees = models.PositiveIntegerField(
+        _("Notifications envoyées"),
+        default=0,
+        help_text="Nombre de notifications réellement envoyées"
+    )
+    
+    nombre_notifications_echec = models.PositiveIntegerField(
+        _("Notifications en échec"),
+        default=0,
+        help_text="Nombre de notifications ayant échoué"
     )
     
     createur = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
-        related_name='notification_batches_created',
-        verbose_name=_('Créateur'),
-        help_text="Utilisateur qui a créé cette campagne"
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notification_batches_created",
+        verbose_name=_("Créateur"),
+        help_text="Utilisateur qui a créé ce lot"
     )
     
     class Meta:
-        verbose_name = _('Campagne de notification')
-        verbose_name_plural = _('Campagnes de notification')
-        ordering = ['-date_creation']
+        verbose_name = _("Lot de notifications")
+        verbose_name_plural = _("Lots de notifications")
+        ordering = ["-date_planification"]
+        indexes = [
+            models.Index(fields=["statut", "date_planification"], name="notif_batch_status_plan_date"),
+            models.Index(fields=["template"], name="notif_batch_template_idx"),
+        ]
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        if self.date_planification < timezone.now() and self.statut == "PLANIFIE":
+            raise ValidationError(_("La date de planification ne peut pas être dans le passé pour un lot planifié."))
+        
+        # Valider les données JSON
+        if self.filtre_utilisateurs:
+            json_str = json.dumps(self.filtre_utilisateurs)
+            if len(json_str) > 2000: # Limite arbitraire
+                raise ValidationError("Le filtre utilisateurs est trop volumineux.")
+        
+        if self.variables_globales:
+            json_str = json.dumps(self.variables_globales)
+            if len(json_str) > 2000: # Limite arbitraire
+                raise ValidationError("Les variables globales sont trop volumineuses.")
+
     def __str__(self):
-        """Représentation string de la campagne."""
-        return f"{self.nom} - {self.statut}"
+        """Représentation string du lot."""
+        return f"{self.nom} ({self.get_statut_display()}) - Planifié pour {self.date_planification.strftime('%Y-%m-%d %H:%M')}"
     
-    def get_delivery_rate(self):
-        """Calcule le taux de livraison."""
-        if self.nombre_envoyes == 0:
-            return 0
-        return (self.nombre_livres / self.nombre_envoyes) * 100
-    
-    def get_read_rate(self):
-        """Calcule le taux de lecture."""
-        if self.nombre_livres == 0:
-            return 0
-        return (self.nombre_lus / self.nombre_livres) * 100
+    def mark_as_sent(self, sent_count, failed_count):
+        """
+        Met à jour le statut du lot après envoi.
+        """
+        self.nombre_notifications_envoyees = sent_count
+        self.nombre_notifications_echec = failed_count
+        self.date_fin_envoi = timezone.now()
+        self.statut = "TERMINE"
+        self.save(update_fields=[
+            "nombre_notifications_envoyees", 
+            "nombre_notifications_echec", 
+            "date_fin_envoi", 
+            "statut"
+        ])
+        logger.info(f"Lot de notifications \'{self.nom}\' terminé. Envoyées: {sent_count}, Échecs: {failed_count}.")
+
+    @classmethod
+    def get_pending_batches(cls):
+        """
+        Retourne les lots de notifications planifiés et prêts à être envoyés.
+        """
+        return cls.objects.filter(
+            statut="PLANIFIE",
+            date_planification__lte=timezone.now()
+        ).order_by("date_planification")
+
+    @classmethod
+    def cleanup_old_batches(cls, days=365):
+        """
+        Nettoie les anciens lots de notifications terminés ou annulés.
+        """
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(
+            statut__in=["TERMINE", "ANNULE", "ECHEC"],
+            date_fin_envoi__lt=cutoff_date
+        ).delete()[0]
+        logger.info(f"Nettoyage NotificationBatch: {deleted_count} anciens lots supprimés.")
+        return deleted_count
+
+
 

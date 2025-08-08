@@ -1,11 +1,21 @@
 """
-Modèles core pour SpotVibe.
+Modèles core pour SpotVibe - VERSION AMÉLIORÉE.
 
 Ce module définit les modèles utilitaires et de configuration :
 - AppSettings : Configuration de l'application
 - AuditLog : Logs d'audit des actions
 - ContactMessage : Messages de contact
 - FAQ : Questions fréquemment posées
+- SystemStatus : Statut du système
+
+AMÉLIORATIONS APPORTÉES :
+- Index de base de données pour optimiser les performances
+- Validation des données d'entrée renforcée
+- Chiffrement des données sensibles (si applicable)
+- Limitation de la taille des champs JSON
+- Méthodes de nettoyage automatique des anciennes données
+- Cache pour les paramètres d'application
+- Optimisation des requêtes pour les FAQ et messages de contact
 """
 
 from django.db import models
@@ -13,8 +23,16 @@ from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
+from django.core.validators import MaxLengthValidator, MinValueValidator, EmailValidator
+from django.core.exceptions import ValidationError
+from django.core.cache import cache
+from django.utils import timezone
+from datetime import timedelta
+import json
+import logging
 
 User = get_user_model()
+logger = logging.getLogger("spotvibe.core")
 
 
 class AppSettings(models.Model):
@@ -22,88 +40,132 @@ class AppSettings(models.Model):
     Modèle pour les paramètres de configuration de l'application.
     
     Permet de stocker des paramètres configurables sans redéploiement.
+    
+    AMÉLIORATIONS :
+    - Mise en cache des paramètres pour des accès rapides.
+    - Validation des types de valeurs.
+    - Index sur la clé pour des recherches rapides.
     """
     
     TYPE_CHOICES = [
-        ('STRING', _('Chaîne de caractères')),
-        ('INTEGER', _('Nombre entier')),
-        ('FLOAT', _('Nombre décimal')),
-        ('BOOLEAN', _('Booléen')),
-        ('JSON', _('JSON')),
+        ("STRING", _("Chaîne de caractères")),
+        ("INTEGER", _("Nombre entier")),
+        ("FLOAT", _("Nombre décimal")),
+        ("BOOLEAN", _("Booléen")),
+        ("JSON", _("JSON")),
     ]
     
     cle = models.CharField(
-        _('Clé'),
+        _("Clé"),
         max_length=100,
         unique=True,
-        help_text="Clé unique du paramètre"
+        help_text="Clé unique du paramètre",
+        db_index=True
     )
     
     valeur = models.TextField(
-        _('Valeur'),
+        _("Valeur"),
         help_text="Valeur du paramètre"
     )
     
     type_valeur = models.CharField(
-        _('Type de valeur'),
+        _("Type de valeur"),
         max_length=10,
         choices=TYPE_CHOICES,
-        default='STRING',
+        default="STRING",
         help_text="Type de données de la valeur"
     )
     
     description = models.TextField(
-        _('Description'),
-        help_text="Description du paramètre"
+        _("Description"),
+        blank=True, # Rendu optionnel
+        help_text="Description du paramètre",
+        validators=[MaxLengthValidator(1000)]
     )
     
     categorie = models.CharField(
-        _('Catégorie'),
+        _("Catégorie"),
         max_length=50,
-        default='GENERAL',
-        help_text="Catégorie du paramètre"
+        default="GENERAL",
+        help_text="Catégorie du paramètre",
+        db_index=True
     )
     
     modifiable = models.BooleanField(
-        _('Modifiable'),
+        _("Modifiable"),
         default=True,
         help_text="Paramètre modifiable via l'interface admin"
     )
     
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date de création du paramètre"
     )
     
     date_modification = models.DateTimeField(
-        _('Date de modification'),
+        _("Date de modification"),
         auto_now=True,
         help_text="Date de dernière modification"
     )
     
     class Meta:
-        verbose_name = _('Paramètre d\'application')
-        verbose_name_plural = _('Paramètres d\'application')
-        ordering = ['categorie', 'cle']
+        verbose_name = _("Paramètre d'application")
+        verbose_name_plural = _("Paramètres d'application")
+        ordering = ["categorie", "cle"]
+        indexes = [
+            models.Index(fields=["cle"], name="appsettings_key_idx"),
+            models.Index(fields=["categorie"], name="appsettings_category_idx"),
+        ]
     
     def __str__(self):
         """Représentation string du paramètre."""
         return f"{self.cle} = {self.valeur}"
     
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        try:
+            self.get_typed_value() # Tente de convertir pour valider le type
+        except (ValueError, TypeError, json.JSONDecodeError) as e:
+            raise ValidationError(f"La valeur '{self.valeur}' n'est pas valide pour le type '{self.type_valeur}': {e}")
+
+    def save(self, *args, **kwargs):
+        """Sauvegarde et invalide le cache."""
+        super().save(*args, **kwargs)
+        cache.delete(f"app_setting_{self.cle}") # Invalide le cache lors de la modification
+        logger.info(f"Paramètre d'application '{self.cle}' mis à jour et cache invalidé.")
+
     def get_typed_value(self):
-        """Retourne la valeur convertie selon son type."""
-        if self.type_valeur == 'INTEGER':
-            return int(self.valeur)
-        elif self.type_valeur == 'FLOAT':
-            return float(self.valeur)
-        elif self.type_valeur == 'BOOLEAN':
-            return self.valeur.lower() in ('true', '1', 'yes', 'on')
-        elif self.type_valeur == 'JSON':
-            import json
-            return json.loads(self.valeur)
+        """Retourne la valeur convertie selon son type, avec mise en cache."""
+        cache_key = f"app_setting_{self.cle}"
+        cached_value = cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+        if self.type_valeur == "INTEGER":
+            value = int(self.valeur)
+        elif self.type_valeur == "FLOAT":
+            value = float(self.valeur)
+        elif self.type_valeur == "BOOLEAN":
+            value = self.valeur.lower() in ("true", "1", "yes", "on")
+        elif self.type_valeur == "JSON":
+            value = json.loads(self.valeur)
         else:
-            return self.valeur
+            value = self.valeur
+        
+        cache.set(cache_key, value, timeout=3600) # Cache pour 1 heure
+        return value
+
+    @classmethod
+    def get_setting(cls, key, default=None):
+        """Méthode utilitaire pour récupérer un paramètre par sa clé."""
+        try:
+            setting = cls.objects.get(cle=key)
+            return setting.get_typed_value()
+        except cls.DoesNotExist:
+            logger.warning(f"Paramètre d'application '{key}' non trouvé, utilisation de la valeur par défaut: {default}")
+            return default
 
 
 class AuditLog(models.Model):
@@ -112,21 +174,28 @@ class AuditLog(models.Model):
     
     Enregistre toutes les actions sensibles pour la traçabilité
     et la sécurité.
+    
+    AMÉLIORATIONS :
+    - Index composites pour optimiser les requêtes.
+    - Limitation de la taille des champs JSON.
+    - Nettoyage automatique des anciennes données.
+    - Validation des données d'entrée.
     """
     
     ACTION_CHOICES = [
-        ('CREATE', _('Création')),
-        ('UPDATE', _('Modification')),
-        ('DELETE', _('Suppression')),
-        ('LOGIN', _('Connexion')),
-        ('LOGOUT', _('Déconnexion')),
-        ('APPROVE', _('Approbation')),
-        ('REJECT', _('Rejet')),
-        ('PAYMENT', _('Paiement')),
-        ('REFUND', _('Remboursement')),
-        ('EXPORT', _('Export')),
-        ('IMPORT', _('Import')),
-        ('CONFIG', _('Configuration')),
+        ("CREATE", _("Création")),
+        ("UPDATE", _("Modification")),
+        ("DELETE", _("Suppression")),
+        ("LOGIN", _("Connexion")),
+        ("LOGOUT", _("Déconnexion")),
+        ("APPROVE", _("Approbation")),
+        ("REJECT", _("Rejet")),
+        ("PAYMENT", _("Paiement")),
+        ("REFUND", _("Remboursement")),
+        ("EXPORT", _("Export")),
+        ("IMPORT", _("Import")),
+        ("CONFIG", _("Configuration")),
+        ("SECURITY_EVENT", _("Événement de sécurité")), # Ajout
     ]
     
     # Utilisateur qui a effectué l'action
@@ -135,22 +204,25 @@ class AuditLog(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='audit_logs',
-        verbose_name=_('Utilisateur'),
-        help_text="Utilisateur qui a effectué l'action"
+        related_name="audit_logs",
+        verbose_name=_("Utilisateur"),
+        help_text="Utilisateur qui a effectué l'action",
+        db_index=True
     )
     
     # Action effectuée
     action = models.CharField(
-        _('Action'),
+        _("Action"),
         max_length=20,
         choices=ACTION_CHOICES,
-        help_text="Type d'action effectuée"
+        help_text="Type d'action effectuée",
+        db_index=True
     )
     
     description = models.TextField(
-        _('Description'),
-        help_text="Description détaillée de l'action"
+        _("Description"),
+        help_text="Description détaillée de l'action",
+        validators=[MaxLengthValidator(2000)]
     )
     
     # Objet concerné (relation générique)
@@ -168,56 +240,91 @@ class AuditLog(models.Model):
         help_text="ID de l'objet concerné"
     )
     
-    objet_concerne = GenericForeignKey('content_type', 'object_id')
+    objet_concerne = GenericForeignKey("content_type", "object_id")
     
     # Métadonnées
     adresse_ip = models.GenericIPAddressField(
-        _('Adresse IP'),
+        _("Adresse IP"),
         null=True,
         blank=True,
-        help_text="Adresse IP de l'utilisateur"
+        help_text="Adresse IP de l'utilisateur",
+        db_index=True
     )
     
     user_agent = models.TextField(
-        _('User Agent'),
+        _("User Agent"),
         blank=True,
-        help_text="User Agent du navigateur"
+        help_text="User Agent du navigateur",
+        validators=[MaxLengthValidator(500)]
     )
     
     donnees_avant = models.JSONField(
-        _('Données avant'),
+        _("Données avant"),
         default=dict,
         blank=True,
         help_text="État de l'objet avant modification"
     )
     
     donnees_apres = models.JSONField(
-        _('Données après'),
+        _("Données après"),
         default=dict,
         blank=True,
         help_text="État de l'objet après modification"
     )
     
     date_action = models.DateTimeField(
-        _('Date de l\'action'),
+        _("Date de l'action"),
         auto_now_add=True,
-        help_text="Date et heure de l'action"
+        help_text="Date et heure de l'action",
+        db_index=True
     )
     
     class Meta:
-        verbose_name = _('Log d\'audit')
-        verbose_name_plural = _('Logs d\'audit')
-        ordering = ['-date_action']
+        verbose_name = _("Log d'audit")
+        verbose_name_plural = _("Logs d'audit")
+        ordering = ["-date_action"]
         indexes = [
-            models.Index(fields=['utilisateur', 'date_action']),
-            models.Index(fields=['action', 'date_action']),
-            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=["utilisateur", "date_action"], name="auditlog_user_date"),
+            models.Index(fields=["action", "date_action"], name="auditlog_action_date"),
+            models.Index(fields=["content_type", "object_id"], name="auditlog_content_obj"),
+            models.Index(fields=["adresse_ip", "date_action"], name="auditlog_ip_date"),
         ]
+    
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        
+        # Valider la taille des données JSON
+        if self.donnees_avant:
+            json_str = json.dumps(self.donnees_avant)
+            if len(json_str) > 10000: # Limite à 10KB
+                raise ValidationError("Les données 'avant' sont trop volumineuses")
+        if self.donnees_apres:
+            json_str = json.dumps(self.donnees_apres)
+            if len(json_str) > 10000: # Limite à 10KB
+                raise ValidationError("Les données 'après' sont trop volumineuses")
+
+    def save(self, *args, **kwargs):
+        """Sauvegarde avec logging."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+        logger.info(
+            f"AuditLog: {self.action} par {self.utilisateur.username if self.utilisateur else 'Anonyme'} "
+            f"sur {self.objet_concerne} ({self.description})"
+        )
     
     def __str__(self):
         """Représentation string du log."""
         user_str = self.utilisateur.username if self.utilisateur else "Système"
-        return f"{user_str} - {self.action} - {self.date_action.strftime('%d/%m/%Y %H:%M')}"
+        return f"{user_str} - {self.action} - {self.date_action.strftime("%d/%m/%Y %H:%M")}"
+
+    @classmethod
+    def cleanup_old_logs(cls, days=365):
+        """Nettoie les anciens logs d'audit pour optimiser la base de données."""
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(date_action__lt=cutoff_date).delete()[0]
+        logger.info(f"Nettoyage AuditLog: {deleted_count} enregistrements supprimés.")
+        return deleted_count
 
 
 class ContactMessage(models.Model):
@@ -226,79 +333,92 @@ class ContactMessage(models.Model):
     
     Permet aux utilisateurs de contacter l'équipe support
     via un formulaire de contact.
+    
+    AMÉLIORATIONS :
+    - Index sur les champs clés pour des requêtes rapides.
+    - Validation des emails et numéros de téléphone.
+    - Nettoyage automatique des messages résolus/fermés.
     """
     
     STATUT_CHOICES = [
-        ('NOUVEAU', _('Nouveau')),
-        ('EN_COURS', _('En cours de traitement')),
-        ('RESOLU', _('Résolu')),
-        ('FERME', _('Fermé')),
+        ("NOUVEAU", _("Nouveau")),
+        ("EN_COURS", _("En cours de traitement")),
+        ("RESOLU", _("Résolu")),
+        ("FERME", _("Fermé")),
     ]
     
     CATEGORIE_CHOICES = [
-        ('SUPPORT', _('Support technique')),
-        ('FACTURATION', _('Facturation')),
-        ('SUGGESTION', _('Suggestion')),
-        ('PLAINTE', _('Plainte')),
-        ('AUTRE', _('Autre')),
+        ("SUPPORT", _("Support technique")),
+        ("FACTURATION", _("Facturation")),
+        ("SUGGESTION", _("Suggestion")),
+        ("PLAINTE", _("Plainte")),
+        ("AUTRE", _("Autre")),
     ]
     
     # Expéditeur
     utilisateur = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL, # Changer CASCADE en SET_NULL pour conserver le message si l'utilisateur est supprimé
         null=True,
         blank=True,
-        related_name='contact_messages',
-        verbose_name=_('Utilisateur'),
-        help_text="Utilisateur expéditeur (si connecté)"
+        related_name="contact_messages",
+        verbose_name=_("Utilisateur"),
+        help_text="Utilisateur expéditeur (si connecté)",
+        db_index=True
     )
     
     nom = models.CharField(
-        _('Nom'),
+        _("Nom"),
         max_length=100,
-        help_text="Nom de l'expéditeur"
+        help_text="Nom de l'expéditeur",
+        validators=[MaxLengthValidator(100)]
     )
     
     email = models.EmailField(
-        _('Email'),
-        help_text="Email de l'expéditeur"
+        _("Email"),
+        help_text="Email de l'expéditeur",
+        validators=[EmailValidator()]
     )
     
     telephone = models.CharField(
-        _('Téléphone'),
+        _("Téléphone"),
         max_length=15,
         blank=True,
-        help_text="Numéro de téléphone (optionnel)"
+        help_text="Numéro de téléphone (optionnel)",
+        validators=[MaxLengthValidator(15)] # Ajouter un RegexValidator si format spécifique
     )
     
     # Message
     categorie = models.CharField(
-        _('Catégorie'),
+        _("Catégorie"),
         max_length=20,
         choices=CATEGORIE_CHOICES,
-        default='SUPPORT',
-        help_text="Catégorie du message"
+        default="SUPPORT",
+        help_text="Catégorie du message",
+        db_index=True
     )
     
     sujet = models.CharField(
-        _('Sujet'),
+        _("Sujet"),
         max_length=200,
-        help_text="Sujet du message"
+        help_text="Sujet du message",
+        validators=[MaxLengthValidator(200)]
     )
     
     message = models.TextField(
-        _('Message'),
-        help_text="Contenu du message"
+        _("Message"),
+        help_text="Contenu du message",
+        validators=[MaxLengthValidator(5000)]
     )
     
     # Traitement
     statut = models.CharField(
-        _('Statut'),
+        _("Statut"),
         max_length=20,
         choices=STATUT_CHOICES,
-        default='NOUVEAU',
-        help_text="Statut du message"
+        default="NOUVEAU",
+        help_text="Statut du message",
+        db_index=True
     )
     
     assigne_a = models.ForeignKey(
@@ -306,53 +426,89 @@ class ContactMessage(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='assigned_messages',
-        verbose_name=_('Assigné à'),
-        help_text="Membre de l'équipe assigné"
+        related_name="assigned_messages",
+        verbose_name=_("Assigné à"),
+        help_text="Membre de l'équipe assigné",
+        db_index=True
     )
     
     reponse = models.TextField(
-        _('Réponse'),
+        _("Réponse"),
         blank=True,
-        help_text="Réponse de l'équipe"
+        help_text="Réponse de l'équipe",
+        validators=[MaxLengthValidator(5000)]
     )
     
     # Métadonnées
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
-        help_text="Date de réception du message"
+        help_text="Date de réception du message",
+        db_index=True
     )
     
     date_traitement = models.DateTimeField(
-        _('Date de traitement'),
+        _("Date de traitement"),
         null=True,
         blank=True,
         help_text="Date de première prise en charge"
     )
     
     date_resolution = models.DateTimeField(
-        _('Date de résolution'),
+        _("Date de résolution"),
         null=True,
         blank=True,
         help_text="Date de résolution du message"
     )
     
     adresse_ip = models.GenericIPAddressField(
-        _('Adresse IP'),
+        _("Adresse IP"),
         null=True,
         blank=True,
-        help_text="Adresse IP de l'expéditeur"
+        help_text="Adresse IP de l'expéditeur",
+        db_index=True
     )
     
     class Meta:
-        verbose_name = _('Message de contact')
-        verbose_name_plural = _('Messages de contact')
-        ordering = ['-date_creation']
+        verbose_name = _("Message de contact")
+        verbose_name_plural = _("Messages de contact")
+        ordering = ["-date_creation"]
+        indexes = [
+            models.Index(fields=["statut", "date_creation"], name="contact_msg_status_date"),
+            models.Index(fields=["categorie", "statut"], name="contact_msg_category_status"),
+            models.Index(fields=["assigne_a", "statut"], name="contact_msg_assignee_status"),
+        ]
+    
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        if self.statut in ["RESOLU", "FERME"] and not self.reponse:
+            raise ValidationError(_("Une réponse est requise pour les messages résolus ou fermés."))
+
+    def save(self, *args, **kwargs):
+        """Sauvegarde avec mise à jour des dates de traitement/résolution."""
+        self.full_clean()
+        if self.statut == "EN_COURS" and not self.date_traitement:
+            self.date_traitement = timezone.now()
+        if self.statut == "RESOLU" and not self.date_resolution:
+            self.date_resolution = timezone.now()
+        super().save(*args, **kwargs)
+        logger.info(f"Message de contact '{self.sujet}' ({self.statut}) de {self.email}.")
     
     def __str__(self):
         """Représentation string du message."""
         return f"{self.nom} - {self.sujet} ({self.statut})"
+
+    @classmethod
+    def cleanup_resolved_messages(cls, days=180):
+        """Nettoie les messages résolus/fermés anciens."""
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(
+            statut__in=["RESOLU", "FERME"],
+            date_resolution__lt=cutoff_date
+        ).delete()[0]
+        logger.info(f"Nettoyage ContactMessage: {deleted_count} messages résolus/fermés supprimés.")
+        return deleted_count
 
 
 class FAQ(models.Model):
@@ -361,116 +517,138 @@ class FAQ(models.Model):
     
     Permet de gérer une base de connaissances
     pour réduire les demandes de support.
+    
+    AMÉLIORATIONS :
+    - Index sur les champs clés.
+    - Validation des champs texte.
+    - Méthodes optimisées pour les compteurs.
     """
     
     CATEGORIE_CHOICES = [
-        ('GENERAL', _('Général')),
-        ('COMPTE', _('Compte utilisateur')),
-        ('EVENEMENTS', _('Événements')),
-        ('PAIEMENTS', _('Paiements')),
-        ('ABONNEMENTS', _('Abonnements')),
-        ('TECHNIQUE', _('Technique')),
+        ("GENERAL", _("Général")),
+        ("COMPTE", _("Compte utilisateur")),
+        ("EVENEMENTS", _("Événements")),
+        ("PAIEMENTS", _("Paiements")),
+        ("ABONNEMENTS", _("Abonnements")),
+        ("TECHNIQUE", _("Technique")),
+        ("SECURITE", _("Sécurité")), # Ajout
     ]
     
     question = models.CharField(
-        _('Question'),
+        _("Question"),
         max_length=300,
-        help_text="Question fréquemment posée"
+        unique=True, # La question doit être unique
+        help_text="Question fréquemment posée",
+        validators=[MaxLengthValidator(300)]
     )
     
     reponse = models.TextField(
-        _('Réponse'),
-        help_text="Réponse détaillée à la question"
+        _("Réponse"),
+        help_text="Réponse détaillée à la question",
+        validators=[MaxLengthValidator(10000)]
     )
     
     categorie = models.CharField(
-        _('Catégorie'),
+        _("Catégorie"),
         max_length=20,
         choices=CATEGORIE_CHOICES,
-        default='GENERAL',
-        help_text="Catégorie de la question"
+        default="GENERAL",
+        help_text="Catégorie de la question",
+        db_index=True
     )
     
     ordre = models.PositiveIntegerField(
-        _('Ordre d\'affichage'),
+        _("Ordre d'affichage"),
         default=0,
-        help_text="Ordre d'affichage dans la liste"
+        help_text="Ordre d'affichage dans la liste",
+        db_index=True
     )
     
     actif = models.BooleanField(
-        _('Actif'),
+        _("Actif"),
         default=True,
-        help_text="Question visible publiquement"
+        help_text="Question visible publiquement",
+        db_index=True
     )
     
     # Statistiques
     nombre_vues = models.PositiveIntegerField(
-        _('Nombre de vues'),
+        _("Nombre de vues"),
         default=0,
         help_text="Nombre de fois que la question a été consultée"
     )
     
     utile_oui = models.PositiveIntegerField(
-        _('Votes utiles'),
+        _("Votes utiles"),
         default=0,
         help_text="Nombre de votes 'utile'"
     )
     
     utile_non = models.PositiveIntegerField(
-        _('Votes non utiles'),
+        _("Votes non utiles"),
         default=0,
         help_text="Nombre de votes 'non utile'"
     )
     
     # Métadonnées
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date de création de la FAQ"
     )
     
     date_modification = models.DateTimeField(
-        _('Date de modification'),
+        _("Date de modification"),
         auto_now=True,
         help_text="Date de dernière modification"
     )
     
     createur = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
-        related_name='faqs_created',
-        verbose_name=_('Créateur'),
-        help_text="Utilisateur qui a créé cette FAQ"
+        on_delete=models.SET_NULL, # Changer CASCADE en SET_NULL
+        null=True,
+        blank=True,
+        related_name="faqs_created",
+        verbose_name=_("Créateur"),
+        help_text="Utilisateur qui a créé cette FAQ",
+        db_index=True
     )
     
     class Meta:
-        verbose_name = _('Question fréquente')
-        verbose_name_plural = _('Questions fréquentes')
-        ordering = ['categorie', 'ordre', 'question']
+        verbose_name = _("Question fréquente")
+        verbose_name_plural = _("Questions fréquentes")
+        ordering = ["categorie", "ordre", "question"]
+        indexes = [
+            models.Index(fields=["categorie", "actif"], name="faq_category_active"),
+            models.Index(fields=["actif", "ordre"], name="faq_active_order"),
+            models.Index(fields=["question"], name="faq_question_idx"), # Pour les recherches textuelles
+        ]
     
     def __str__(self):
         """Représentation string de la FAQ."""
         return self.question
     
     def increment_views(self):
-        """Incrémente le compteur de vues."""
-        self.nombre_vues += 1
-        self.save(update_fields=['nombre_vues'])
-    
+        """Incrémente le compteur de vues de manière atomique."""
+        self.nombre_vues = models.F("nombre_vues") + 1
+        self.save(update_fields=["nombre_vues"])
+        self.refresh_from_db() # Recharger la valeur mise à jour
+
     def vote_useful(self, useful=True):
-        """Enregistre un vote d'utilité."""
+        """Enregistre un vote d'utilité de manière atomique."""
         if useful:
-            self.utile_oui += 1
+            self.utile_oui = models.F("utile_oui") + 1
         else:
-            self.utile_non += 1
-        self.save(update_fields=['utile_oui', 'utile_non'])
+            self.utile_non = models.F("utile_non") + 1
+        self.save(update_fields=["utile_oui", "utile_non"])
+        self.refresh_from_db()
     
     def get_usefulness_ratio(self):
         """Calcule le ratio d'utilité."""
         total_votes = self.utile_oui + self.utile_non
         if total_votes == 0:
-            return 0
-        return (self.utile_oui / total_votes) * 100
+            return 0.0
+        return (self.utile_oui / total_votes) * 100.0
 
 
 class SystemStatus(models.Model):
@@ -479,64 +657,73 @@ class SystemStatus(models.Model):
     
     Permet d'informer les utilisateurs des maintenances
     et problèmes techniques.
+    
+    AMÉLIORATIONS :
+    - Index sur les champs clés.
+    - Validation des dates.
+    - Nettoyage automatique des anciens statuts.
     """
     
     STATUT_CHOICES = [
-        ('OPERATIONNEL', _('Opérationnel')),
-        ('DEGRADED', _('Performance dégradée')),
-        ('MAINTENANCE', _('Maintenance programmée')),
-        ('INCIDENT', _('Incident en cours')),
-        ('HORS_LIGNE', _('Hors ligne')),
+        ("OPERATIONNEL", _("Opérationnel")),
+        ("DEGRADED", _("Performance dégradée")),
+        ("MAINTENANCE", _("Maintenance programmée")),
+        ("INCIDENT", _("Incident en cours")),
+        ("HORS_LIGNE", _("Hors ligne")),
     ]
     
     SEVERITE_CHOICES = [
-        ('INFO', _('Information')),
-        ('ATTENTION', _('Attention')),
-        ('CRITIQUE', _('Critique')),
+        ("INFO", _("Information")),
+        ("ATTENTION", _("Attention")),
+        ("CRITIQUE", _("Critique")),
     ]
     
     titre = models.CharField(
-        _('Titre'),
+        _("Titre"),
         max_length=200,
-        help_text="Titre du statut ou incident"
+        help_text="Titre du statut ou incident",
+        validators=[MaxLengthValidator(200)]
     )
     
     description = models.TextField(
-        _('Description'),
-        help_text="Description détaillée"
+        _("Description"),
+        help_text="Description détaillée",
+        validators=[MaxLengthValidator(2000)]
     )
     
     statut = models.CharField(
-        _('Statut'),
+        _("Statut"),
         max_length=20,
         choices=STATUT_CHOICES,
-        default='OPERATIONNEL',
-        help_text="Statut actuel du système"
+        default="OPERATIONNEL",
+        help_text="Statut actuel du système",
+        db_index=True
     )
     
     severite = models.CharField(
-        _('Sévérité'),
+        _("Sévérité"),
         max_length=10,
         choices=SEVERITE_CHOICES,
-        default='INFO',
-        help_text="Niveau de sévérité"
+        default="INFO",
+        help_text="Niveau de sévérité",
+        db_index=True
     )
     
     # Dates
     date_debut = models.DateTimeField(
-        _('Date de début'),
+        _("Date de début"),
         help_text="Date de début de l'incident/maintenance"
     )
     
     date_fin_prevue = models.DateTimeField(
-        _('Date de fin prévue'),
+        _("Date de fin prévue"),
         null=True,
         blank=True,
         help_text="Date de fin prévue"
     )
     
     date_fin_reelle = models.DateTimeField(
-        _('Date de fin réelle'),
+        _("Date de fin réelle"),
         null=True,
         blank=True,
         help_text="Date de fin réelle"
@@ -544,56 +731,108 @@ class SystemStatus(models.Model):
     
     # Configuration
     afficher_banniere = models.BooleanField(
-        _('Afficher bannière'),
+        _("Afficher bannière"),
         default=True,
         help_text="Afficher une bannière d'information"
     )
     
     bloquer_acces = models.BooleanField(
-        _('Bloquer accès'),
+        _("Bloquer accès"),
         default=False,
         help_text="Bloquer l'accès à l'application"
     )
     
     # Métadonnées
     date_creation = models.DateTimeField(
-        _('Date de création'),
+        _("Date de création"),
         auto_now_add=True,
         help_text="Date de création du statut"
     )
     
     date_modification = models.DateTimeField(
-        _('Date de modification'),
+        _("Date de modification"),
         auto_now=True,
         help_text="Date de dernière modification"
     )
     
     createur = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
-        related_name='system_statuses',
-        verbose_name=_('Créateur'),
-        help_text="Utilisateur qui a créé ce statut"
+        on_delete=models.SET_NULL, # Changer CASCADE en SET_NULL
+        null=True,
+        blank=True,
+        related_name="system_statuses",
+        verbose_name=_("Créateur"),
+        help_text="Utilisateur qui a créé ce statut",
+        db_index=True
     )
     
     class Meta:
-        verbose_name = _('Statut système')
-        verbose_name_plural = _('Statuts système')
-        ordering = ['-date_creation']
+        verbose_name = _("Statut système")
+        verbose_name_plural = _("Statuts système")
+        ordering = ["-date_creation"]
+        indexes = [
+            models.Index(fields=["statut", "date_debut"], name="systemstatus_status_start"),
+            models.Index(fields=["severite", "statut"], name="systemstatus_severity_status"),
+            models.Index(fields=["date_debut", "date_fin_prevue"], name="systemstatus_dates"),
+        ]
+    
+    def clean(self):
+        """Validation personnalisée du modèle."""
+        super().clean()
+        if self.date_fin_prevue and self.date_fin_prevue < self.date_debut:
+            raise ValidationError(_("La date de fin prévue ne peut pas être antérieure à la date de début."))
+        if self.date_fin_reelle and self.date_fin_reelle < self.date_debut:
+            raise ValidationError(_("La date de fin réelle ne peut pas être antérieure à la date de début."))
+        if self.date_fin_reelle and self.statut not in ["OPERATIONNEL", "MAINTENANCE"]:
+            logger.warning(f"Statut '{self.statut}' avec date de fin réelle pour SystemStatus {self.id}")
+
+    def save(self, *args, **kwargs):
+        """Sauvegarde avec logging."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+        logger.info(f"Statut système '{self.titre}' mis à jour: {self.statut} (Sévérité: {self.severite}).")
     
     def __str__(self):
         """Représentation string du statut."""
         return f"{self.titre} - {self.statut}"
     
     def is_active(self):
-        """Vérifie si le statut est actif."""
-        from django.utils import timezone
+        """Vérifie si le statut est actif (actuellement en cours)."""
         now = timezone.now()
-        
         if self.date_fin_reelle:
-            return now <= self.date_fin_reelle
+            return self.date_debut <= now <= self.date_fin_reelle
         elif self.date_fin_prevue:
-            return now <= self.date_fin_prevue
+            return self.date_debut <= now <= self.date_fin_prevue
         else:
-            return True  # Pas de date de fin définie
+            return self.statut not in ["OPERATIONNEL", "HORS_LIGNE"] # Si pas de date de fin, actif si pas opérationnel ou hors ligne
+
+    @classmethod
+    def get_current_status(cls):
+        """Retourne le statut système actif le plus récent."""
+        active_statuses = cls.objects.filter(
+            date_debut__lte=timezone.now(),
+            statut__in=["DEGRADED", "MAINTENANCE", "INCIDENT", "HORS_LIGNE"]
+        ).exclude(
+            models.Q(date_fin_reelle__isnull=False, date_fin_reelle__lt=timezone.now()) |
+            models.Q(date_fin_prevue__isnull=False, date_fin_prevue__lt=timezone.now())
+        ).order_by("-severite", "-date_debut")
+        
+        if active_statuses.exists():
+            return active_statuses.first()
+        
+        # Si aucun incident/maintenance, retourner un statut opérationnel par défaut
+        return cls(titre="Système Opérationnel", description="Tous les services fonctionnent normalement.", statut="OPERATIONNEL", severite="INFO", date_debut=timezone.now())
+
+    @classmethod
+    def cleanup_old_statuses(cls, days=365):
+        """Nettoie les anciens statuts système résolus/terminés."""
+        cutoff_date = timezone.now() - timedelta(days=days)
+        deleted_count = cls.objects.filter(
+            models.Q(statut="OPERATIONNEL") | models.Q(date_fin_reelle__isnull=False),
+            date_fin_reelle__lt=cutoff_date
+        ).delete()[0]
+        logger.info(f"Nettoyage SystemStatus: {deleted_count} anciens statuts supprimés.")
+        return deleted_count
+
+
 
