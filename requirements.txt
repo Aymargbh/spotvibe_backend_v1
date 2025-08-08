@@ -16,3 +16,5 @@ google-auth
 google-auth-oauthlib
 facebook-sdk
 requests
+ffmpeg-python
+
