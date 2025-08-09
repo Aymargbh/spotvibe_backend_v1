@@ -263,6 +263,7 @@ class Notification(models.Model):
     TYPE_CHOICES = NotificationTemplate.TYPE_CHOICES
     
     STATUT_CHOICES = [
+        ("NOUVEAU", _("Nouveau")),
         ("EN_ATTENTE", _("En attente")),
         ("ENVOYE", _("Envoyé")),
         ("LIVRE", _("Livré")),
@@ -340,7 +341,7 @@ class Notification(models.Model):
         _("Statut"),
         max_length=20,
         choices=STATUT_CHOICES,
-        default="EN_ATTENTE",
+        default="NOUVEAU",
         help_text="Statut de la notification",
         db_index=True
     )

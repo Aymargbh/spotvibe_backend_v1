@@ -56,9 +56,13 @@ class EventCreateView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         """Crée un nouvel événement."""
+        if not request.user.can_create_event():
+            return Response({
+                'error': 'Vous n\'avez pas la permission de créer un événement. Vérifiez votre statut ou votre abonnement.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
         event = serializer.save()
         
         return Response({
@@ -364,16 +368,33 @@ class EventTicketPurchaseView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def create(self, request, *args, **kwargs):
-        """Crée un billet d'événement."""
+        """Crée un billet d'événement et initie le paiement."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        ticket = serializer.save()
+        ticket = serializer.save(utilisateur=request.user) # Assigner l'utilisateur courant
         
-        return Response({
-            'message': 'Billet créé avec succès. Procédez au paiement.',
-            'ticket': EventTicketSerializer(ticket).data
-        }, status=status.HTTP_201_CREATED)
+        # Créer une instance de paiement liée au billet
+        try:
+            payment = Payment.objects.create(
+                utilisateur=request.user,
+                montant=ticket.prix_total,
+                type_paiement='BILLET_EVENEMENT',
+                statut='EN_ATTENTE',
+                objet_concerne=ticket # Lier le paiement au billet
+            )
+            payment_serializer = PaymentSerializer(payment) # Sérialiseur pour le paiement
+            
+            return Response({
+                'message': 'Billet créé avec succès. Procédez au paiement.',
+                'ticket': EventTicketSerializer(ticket).data,
+                'payment': payment_serializer.data # Retourner les détails du paiement
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            ticket.delete() # Annuler la création du billet si le paiement échoue
+            return Response({
+                'error': f'Erreur lors de l\'initialisation du paiement: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class UserEventsView(generics.ListAPIView):

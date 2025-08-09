@@ -75,45 +75,7 @@ class SubscriptionPlan(models.Model):
     )
     
     # Limites et avantages
-    max_evenements_par_mois = models.PositiveIntegerField(
-        _('Événements max par mois'),
-        null=True,
-        blank=True,
-        help_text="Nombre maximum d'événements par mois (null = illimité)"
-    )
-    
-    commission_reduite = models.DecimalField(
-        _('Commission réduite'),
-        max_digits=5,
-        decimal_places=2,
-        default=10.00,
-        help_text="Taux de commission réduit en pourcentage"
-    )
-    
-    support_prioritaire = models.BooleanField(
-        _('Support prioritaire'),
-        default=False,
-        help_text="Accès au support prioritaire"
-    )
-    
-    analytics_avances = models.BooleanField(
-        _('Analytics avancés'),
-        default=False,
-        help_text="Accès aux statistiques avancées"
-    )
-    
-    promotion_evenements = models.BooleanField(
-        _('Promotion d\'événements'),
-        default=False,
-        help_text="Mise en avant automatique des événements"
-    )
-    
-    personnalisation_profil = models.BooleanField(
-        _('Personnalisation profil'),
-        default=False,
-        help_text="Options de personnalisation avancées du profil"
-    )
-    
+
     # Métadonnées
     actif = models.BooleanField(
         _('Actif'),
@@ -302,18 +264,23 @@ class Subscription(models.Model):
         return max(0, delta.days)
     
     def can_create_event(self):
-        """Vérifie si l'utilisateur peut créer un événement selon son plan."""
+        """Vérifie si l'utilisateur peut créer un événement selon son plan et ses fonctionnalités."""
         if not self.is_active():
             return False
         
-        # Réinitialiser le compteur si nécessaire
         self.reset_monthly_counter_if_needed()
         
-        # Vérifier la limite mensuelle
-        if self.plan.max_evenements_par_mois is None:
-            return True  # Illimité
+        # Récupérer la limite d'événements depuis les fonctionnalités du plan
+        try:
+            event_limit_feature = self.plan.features.get(nom='max_evenements_par_mois')
+            max_events = int(event_limit_feature.limite) if event_limit_feature.limite.isdigit() else None
+        except SubscriptionFeature.DoesNotExist:
+            max_events = None # Ou une valeur par défaut si la fonctionnalité n'existe pas
+
+        if max_events is None:
+            return True  # Illimité si la fonctionnalité n'est pas définie ou non numérique
         
-        return self.evenements_crees_ce_mois < self.plan.max_evenements_par_mois
+        return self.evenements_crees_ce_mois < max_events
     
     def increment_events_counter(self):
         """Incrémente le compteur d'événements créés ce mois."""
@@ -337,15 +304,18 @@ class Subscription(models.Model):
             ])
     
     def get_commission_rate(self):
-        """Retourne le taux de commission applicable."""
-        if self.is_active():
-            return self.plan.commission_reduite
+        """Retourne le taux de commission applicable selon le plan et ses fonctionnalités."""
+        if not self.is_active():
+            from django.conf import settings
+            return getattr(settings, 'DEFAULT_TICKET_COMMISSION_RATE', 10) # Taux par défaut si pas d'abonnement actif
+
+        try:
+            commission_feature = self.plan.features.get(nom='commission_reduite')
+            return float(commission_feature.limite) # La limite contient le taux de commission
+        except SubscriptionFeature.DoesNotExist:
+            from django.conf import settings
+            return getattr(settings, 'DEFAULT_TICKET_COMMISSION_RATE', 10) # Taux par défaut si la fonctionnalité n\'existe pas
         
-        # Taux par défaut pour les utilisateurs sans abonnement
-        from django.conf import settings
-        return settings.SPOTVIBE_SETTINGS.get('TICKET_COMMISSION_RATE', 10)
-
-
 class SubscriptionFeature(models.Model):
     """
     Modèle pour les fonctionnalités des plans d'abonnement.

@@ -369,10 +369,10 @@ class EventMedia(models.Model):
             # Extraire une frame au milieu de la vidéo
             (
                 ffmpeg.input(video_path)
-                .filter('select', 'gte(n,1)')  # Première frame
-                .output(thumb_path, vframes=1, format='image2', vcodec='mjpeg')
-                .overwrite_output()
-                .run(quiet=True)
+                    .filter("select", "eq(n,0)")  # Sélectionne la première frame (n=0)
+                    .output(thumb_path, vframes=1, format='image2', vcodec='mjpeg')
+                    .overwrite_output()
+                    .run(quiet=True)
             )
             
             # Redimensionner la miniature si nécessaire
@@ -387,7 +387,7 @@ class EventMedia(models.Model):
         except Exception as e:
             print(f"Erreur génération thumbnail: {e}")
             return None
-
+            
     def _optimize_video(self, video_path):
         """
         Optimise la vidéo pour le web (transcodage en H.264).

@@ -223,12 +223,13 @@ class TwoFactorSetupView(generics.CreateAPIView):
         # Générer un code de vérification
         verification_code = get_random_string(6, allowed_chars='0123456789')
         
-        # Sauvegarder le code temporairement (en production, utilisez Redis)
-        request.session['2fa_code'] = verification_code
-        request.session['2fa_phone'] = phone_number
-        request.session['2fa_expires'] = (
-            timezone.now() + timedelta(minutes=5)
-        ).isoformat()
+        # Créer un objet TwoFactorAuth
+        two_factor_auth = TwoFactorAuth.objects.create(
+            utilisateur=request.user,
+            phone_number=phone_number,
+            verification_code=verification_code,
+            date_expiration=timezone.now() + timedelta(minutes=5)
+        )
         
         # Envoyer le code par SMS (simulation)
         # En production, intégrez un service SMS comme Twilio
@@ -252,44 +253,41 @@ class TwoFactorVerifyView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         """Vérifie le code 2FA."""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
+        phone_number = request.data.get("phone_number") # Récupérer le numéro de téléphone du corps de la requête
+        serializer = self.get_serializer(data=request.data, context={
+            'request': request,
+            'phone_number': phone_number # Passer le numéro de téléphone au sérialiseur
+        })
+        serializer.is_valid(raise_exception=True)        
         code = serializer.validated_data['code']
         
-        # Vérifier le code
-        session_code = request.session.get('2fa_code')
-        session_phone = request.session.get('2fa_phone')
-        session_expires = request.session.get('2fa_expires')
-        
-        if not session_code or not session_phone or not session_expires:
+        try:
+            two_factor_auth = TwoFactorAuth.objects.get(
+                utilisateur=request.user,
+                phone_number=phone_number,
+                statut='EN_ATTENTE',
+                date_expiration__gt=timezone.now()
+            )
+        except TwoFactorAuth.DoesNotExist:
             return Response({
-                'error': 'Aucune configuration 2FA en cours'
+                'error': 'Aucune configuration 2FA en cours ou expirée'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Vérifier l'expiration
-        expires_at = timezone.datetime.fromisoformat(session_expires)
-        if timezone.now() > expires_at:
-            return Response({
-                'error': 'Code expiré. Demandez un nouveau code.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Vérifier le code
-        if code != session_code:
+
+        if code != two_factor_auth.verification_code:
             return Response({
                 'error': 'Code incorrect'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Activer 2FA pour l'utilisateur
+
+        # Activer 2FA pour l\'utilisateur
         user = request.user
-        user.telephone = session_phone
+        user.telephone = two_factor_auth.phone_number
         user.save()
-        
-        # Nettoyer la session
-        del request.session['2fa_code']
-        del request.session['2fa_phone']
-        del request.session['2fa_expires']
-        
+
+        # Marquer la 2FA comme vérifiée
+        two_factor_auth.statut = 'VERIFIE'
+        two_factor_auth.date_verification = timezone.now()
+        two_factor_auth.save()
+
         return Response({
             'message': 'Authentification à deux facteurs activée avec succès'
         }, status=status.HTTP_200_OK)
@@ -318,12 +316,12 @@ class PasswordResetRequestView(generics.CreateAPIView):
             # Générer un token de réinitialisation
             reset_token = secrets.token_urlsafe(32)
             
-            # Sauvegarder le token (en production, utilisez Redis ou la DB)
-            # Ici, nous simulons avec la session
-            request.session[f'reset_token_{reset_token}'] = {
-                'user_id': user.id,
-                'expires': (timezone.now() + timedelta(hours=1)).isoformat()
-            }
+            # Créer un objet PasswordReset
+            password_reset = PasswordReset.objects.create(
+                utilisateur=user,
+                token=reset_token,
+                adresse_ip_creation=self.get_client_ip(request)
+            )
             
             # Envoyer l'email
             reset_url = f"{settings.FRONTEND_URL}/reset-password/{reset_token}"
@@ -378,39 +376,30 @@ class PasswordResetConfirmView(generics.CreateAPIView):
         token = serializer.validated_data['token']
         new_password = serializer.validated_data['new_password']
         
-        # Vérifier le token
-        token_data = request.session.get(f'reset_token_{token}')
-        
-        if not token_data:
+        try:
+            password_reset = PasswordReset.objects.get(
+                token=token,
+                statut='ACTIF',
+                date_expiration__gt=timezone.now()
+            )
+        except PasswordReset.DoesNotExist:
             return Response({
                 'error': 'Token invalide ou expiré'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Vérifier l'expiration
-        expires_at = timezone.datetime.fromisoformat(token_data['expires'])
-        if timezone.now() > expires_at:
-            return Response({
-                'error': 'Token expiré'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Réinitialiser le mot de passe
-        try:
-            user = User.objects.get(id=token_data['user_id'])
-            user.set_password(new_password)
-            user.save()
-            
-            # Supprimer le token
-            del request.session[f'reset_token_{token}']
-            
-            return Response({
-                'message': 'Mot de passe réinitialisé avec succès'
-            }, status=status.HTTP_200_OK)
-            
-        except User.DoesNotExist:
-            return Response({
-                'error': 'Utilisateur introuvable'
-            }, status=status.HTTP_400_BAD_REQUEST)
 
+        user = password_reset.utilisateur
+        user.set_password(new_password)
+        user.save()
+
+        # Marquer le token comme utilisé
+        password_reset.statut = 'UTILISE'
+        password_reset.date_utilisation = timezone.now()
+        password_reset.adresse_ip_utilisation = self.get_client_ip(request)
+        password_reset.save()
+
+        return Response({
+            'message': 'Mot de passe réinitialisé avec succès'
+        }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
