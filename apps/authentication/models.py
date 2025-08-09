@@ -224,8 +224,6 @@ class SocialAccount(models.Model):
         super().clean()
         if self.provider not in [choice[0] for choice in self.PROVIDER_CHOICES]:
             raise ValidationError(_("Fournisseur de compte social invalide."))
-        
-
 
     @classmethod
     def cleanup_old_inactive_accounts(cls, days=365):

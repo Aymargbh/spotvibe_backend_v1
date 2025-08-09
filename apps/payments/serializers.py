@@ -47,7 +47,7 @@ class PaymentCreateSerializer(serializers.Serializer):
     )
     montant = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=100)
     methode_paiement = serializers.ChoiceField(
-        choices=['ORANGE_MONEY', 'MTN_MONEY', 'MOOV_MONEY']
+        choices=['MTN_MONEY', 'MOOV_MONEY']
     )
     telephone_paiement = serializers.CharField(max_length=20)
     description = serializers.CharField(max_length=500, required=False)
@@ -58,13 +58,13 @@ class PaymentCreateSerializer(serializers.Serializer):
     
     def validate_telephone_paiement(self, value):
         """Valide le numéro de téléphone."""
-        if not value.startswith('+225'):
+        if not value.startswith('+229'):
             raise serializers.ValidationError(
-                "Le numéro doit commencer par +225"
+                "Le numéro doit commencer par +229"
             )
-        if len(value) != 13:
+        if len(value) != 15:
             raise serializers.ValidationError(
-                "Format invalide. Utilisez +225XXXXXXXX"
+                "Format invalide. Utilisez +229XXXXXXXX"
             )
         return value
     
@@ -398,9 +398,9 @@ class PaymentRetrySerializer(serializers.Serializer):
     
     def validate_new_phone_number(self, value):
         """Valide le nouveau numéro de téléphone."""
-        if value and not value.startswith('+225'):
+        if value and not value.startswith('+229'):
             raise serializers.ValidationError(
-                "Le numéro doit commencer par +225"
+                "Le numéro doit commencer par +229"
             )
         return value
 

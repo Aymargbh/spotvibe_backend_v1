@@ -28,7 +28,6 @@ urlpatterns = [
     path('commissions/', views.CommissionListView.as_view(), name='commission-list'),
     
     # Webhooks Mobile Money
-    path('webhooks/orange/', views.orange_money_webhook, name='orange-webhook'),
     path('webhooks/mtn/', views.mtn_money_webhook, name='mtn-webhook'),
     path('webhooks/moov/', views.moov_money_webhook, name='moov-webhook'),
 ]

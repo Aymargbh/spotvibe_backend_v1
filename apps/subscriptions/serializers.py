@@ -374,7 +374,7 @@ class SubscriptionPaymentSerializer(serializers.Serializer):
     
     subscription_id = serializers.IntegerField()
     payment_method = serializers.ChoiceField(
-        choices=['ORANGE_MONEY', 'MTN_MONEY', 'MOOV_MONEY']
+        choices=['MTN_MONEY', 'MOOV_MONEY']
     )
     phone_number = serializers.CharField(max_length=20)
     
@@ -395,13 +395,13 @@ class SubscriptionPaymentSerializer(serializers.Serializer):
     
     def validate_phone_number(self, value):
         """Valide le numéro de téléphone."""
-        if not value.startswith('+225'):
+        if not value.startswith('+229'):
             raise serializers.ValidationError(
-                "Le numéro doit commencer par +225"
+                "Le numéro doit commencer par +229"
             )
-        if len(value) != 13:
+        if len(value) != 15:
             raise serializers.ValidationError(
-                "Format invalide. Utilisez +225XXXXXXXX"
+                "Format invalide. Utilisez +229XXXXXXXX"
             )
         return value
 

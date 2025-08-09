@@ -104,7 +104,7 @@ class GoogleAuthSerializer(serializers.Serializer):
                 email=google_user_data['email'],
                 first_name=google_user_data['name'].split()[0],
                 last_name=' '.join(google_user_data['name'].split()[1:]),
-                telephone=f"+225{counter:08d}"  # Téléphone temporaire
+                telephone=f"+229{counter:10d}"  # Téléphone temporaire
             )
             
             social_account.utilisateur = user
@@ -167,7 +167,7 @@ class FacebookAuthSerializer(serializers.Serializer):
                 email=facebook_user_data['email'],
                 first_name=facebook_user_data['name'].split()[0],
                 last_name=' '.join(facebook_user_data['name'].split()[1:]),
-                telephone=f"+225{counter:08d}"
+                telephone=f"+229{counter:10d}"
             )
             
             social_account.utilisateur = user
@@ -201,13 +201,13 @@ class TwoFactorSetupSerializer(serializers.Serializer):
     
     def validate_phone_number(self, value):
         """Valide le numéro de téléphone."""
-        if not value.startswith('+225'):
+        if not value.startswith('+229'):
             raise serializers.ValidationError(
-                "Le numéro doit commencer par +225"
+                "Le numéro doit commencer par +229"
             )
-        if len(value) != 13:
+        if len(value) != 15:
             raise serializers.ValidationError(
-                "Le numéro doit contenir 13 caractères (+225XXXXXXXX)"
+                "Le numéro doit contenir 15 caractères (+229XXXXXXXX)"
             )
         return value
 

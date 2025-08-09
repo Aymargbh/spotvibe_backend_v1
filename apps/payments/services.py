@@ -21,9 +21,7 @@ class PaymentService:
     def initiate_payment(self, payment):
         """Initie un paiement selon la méthode choisie."""
         try:
-            if payment.methode_paiement == 'ORANGE_MONEY':
-                return self._initiate_orange_money(payment)
-            elif payment.methode_paiement == 'MTN_MONEY':
+            if payment.methode_paiement == 'MTN_MONEY':
                 return self._initiate_mtn_money(payment)
             elif payment.methode_paiement == 'MOOV_MONEY':
                 return self._initiate_moov_money(payment)
@@ -37,64 +35,6 @@ class PaymentService:
             return {
                 'success': False,
                 'error': str(e)
-            }
-    
-    def _initiate_orange_money(self, payment):
-        """Initie un paiement Orange Money."""
-        # Configuration Orange Money
-        api_key = getattr(settings, 'ORANGE_MONEY_API_KEY', 'test_key')
-        merchant_key = getattr(settings, 'ORANGE_MONEY_MERCHANT_KEY', 'test_merchant')
-        base_url = getattr(settings, 'ORANGE_MONEY_BASE_URL', 'https://api.orange.com/orange-money-webpay/dev/v1')
-        
-        # Données de la transaction
-        transaction_data = {
-            'merchant_key': merchant_key,
-            'currency': payment.devise,
-            'order_id': str(payment.uuid),
-            'amount': int(payment.montant),
-            'return_url': f"{settings.DOMAIN}/payment/success/",
-            'cancel_url': f"{settings.DOMAIN}/payment/cancel/",
-            'notif_url': f"{settings.DOMAIN}/api/payments/webhooks/orange/",
-            'lang': 'fr',
-            'reference': f"SPOTVIBE-{payment.id}"
-        }
-        
-        try:
-            # Simulation d'appel API (remplacez par l'API réelle)
-            # response = requests.post(
-            #     f"{base_url}/webpayment",
-            #     json=transaction_data,
-            #     headers={'Authorization': f'Bearer {api_key}'}
-            # )
-            
-            # Simulation de réponse
-            transaction_id = f"OM_{uuid.uuid4().hex[:10]}"
-            
-            # Créer la transaction
-            momo_transaction = MomoTransaction.objects.create(
-                payment=payment,
-                provider='ORANGE_MONEY',
-                transaction_id=transaction_id,
-                amount=payment.montant,
-                currency=payment.devise,
-                phone_number=payment.telephone_paiement,
-                status='PENDING'
-            )
-            
-            return {
-                'success': True,
-                'data': {
-                    'transaction_id': transaction_id,
-                    'payment_url': f"{base_url}/webpayment/{transaction_id}",
-                    'status': 'PENDING'
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f'Orange Money API error: {e}')
-            return {
-                'success': False,
-                'error': 'Erreur lors de la communication avec Orange Money'
             }
     
     def _initiate_mtn_money(self, payment):
@@ -111,7 +51,7 @@ class PaymentService:
             'externalId': str(payment.uuid),
             'payer': {
                 'partyIdType': 'MSISDN',
-                'partyId': payment.telephone_paiement.replace('+225', '225')
+                'partyId': payment.telephone_paiement.replace('+229', '229')
             },
             'payerMessage': payment.description or 'Paiement SpotVibe',
             'payeeNote': f'Paiement pour {payment.type_paiement}'
@@ -205,9 +145,7 @@ class PaymentService:
                 }
             
             # Vérifier selon le provider
-            if transaction.provider == 'ORANGE_MONEY':
-                return self._verify_orange_money(transaction)
-            elif transaction.provider == 'MTN_MONEY':
+            if transaction.provider == 'MTN_MONEY':
                 return self._verify_mtn_money(transaction)
             elif transaction.provider == 'MOOV_MONEY':
                 return self._verify_moov_money(transaction)
@@ -218,15 +156,6 @@ class PaymentService:
                 'success': False,
                 'error': str(e)
             }
-    
-    def _verify_orange_money(self, transaction):
-        """Vérifie un paiement Orange Money."""
-        # Simulation de vérification
-        return {
-            'success': True,
-            'status': transaction.status,
-            'transaction_id': transaction.transaction_id
-        }
     
     def _verify_mtn_money(self, transaction):
         """Vérifie un paiement MTN Money."""
@@ -264,50 +193,6 @@ class PaymentService:
 
 class MomoService:
     """Service pour traiter les webhooks Mobile Money."""
-    
-    def process_orange_webhook(self, webhook_data):
-        """Traite un webhook Orange Money."""
-        try:
-            transaction_id = webhook_data['transaction_id']
-            status = webhook_data['status']
-            
-            # Trouver la transaction
-            transaction = MomoTransaction.objects.filter(
-                transaction_id=transaction_id,
-                provider='ORANGE_MONEY'
-            ).first()
-            
-            if not transaction:
-                return {
-                    'success': False,
-                    'error': 'Transaction introuvable'
-                }
-            
-            # Mettre à jour le statut
-            transaction.status = status
-            transaction.callback_data = webhook_data
-            transaction.save()
-            
-            # Mettre à jour le paiement
-            payment = transaction.payment
-            if status == 'SUCCESS':
-                payment.statut = 'REUSSI'
-                payment.date_completion = timezone.now()
-                payment.reference_externe = webhook_data.get('reference', '')
-                
-                # Calculer et créer la commission
-                self._create_commission(payment)
-                
-            elif status == 'FAILED':
-                payment.statut = 'ECHEC'
-                
-            payment.save()
-            
-            return {'success': True}
-            
-        except Exception as e:
-            logger.error(f'Orange webhook processing error: {e}')
-            return {'success': False, 'error': str(e)}
     
     def process_mtn_webhook(self, webhook_data):
         """Traite un webhook MTN Money."""
@@ -441,9 +326,7 @@ class RefundService:
                 }
             
             # Initier le remboursement selon la méthode
-            if payment.methode_paiement == 'ORANGE_MONEY':
-                return self._process_orange_refund(refund)
-            elif payment.methode_paiement == 'MTN_MONEY':
+            if payment.methode_paiement == 'MTN_MONEY':
                 return self._process_mtn_refund(refund)
             elif payment.methode_paiement == 'MOOV_MONEY':
                 return self._process_moov_refund(refund)
@@ -464,16 +347,6 @@ class RefundService:
             return False
         
         return True
-    
-    def _process_orange_refund(self, refund):
-        """Traite un remboursement Orange Money."""
-        # Simulation de remboursement
-        refund.statut = 'APPROUVE'
-        refund.date_traitement = timezone.now()
-        refund.reference_remboursement = f"REF_OM_{uuid.uuid4().hex[:8]}"
-        refund.save()
-        
-        return {'success': True}
     
     def _process_mtn_refund(self, refund):
         """Traite un remboursement MTN Money."""

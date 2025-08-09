@@ -372,14 +372,6 @@ def payment_methods(request):
     
     methods = [
         {
-            'code': 'ORANGE_MONEY',
-            'name': 'Orange Money',
-            'description': 'Paiement via Orange Money',
-            'icon': 'orange-money-icon.png',
-            'available': True,
-            'fees': '1%'
-        },
-        {
             'code': 'MTN_MONEY',
             'name': 'MTN Money',
             'description': 'Paiement via MTN Money',
@@ -401,44 +393,6 @@ def payment_methods(request):
 
 
 # Webhooks pour les providers Mobile Money
-
-@csrf_exempt
-@api_view(['POST'])
-@permission_classes([])
-def orange_money_webhook(request):
-    """
-    Webhook pour Orange Money.
-    
-    POST /api/payments/webhooks/orange/
-    """
-    
-    try:
-        data = request.data
-        logger.info(f'Orange Money webhook received: {data}')
-        
-        # Valider les données
-        serializer = WebhookDataSerializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        
-        # Traiter le webhook
-        momo_service = MomoService()
-        result = momo_service.process_orange_webhook(serializer.validated_data)
-        
-        if result['success']:
-            return Response({'status': 'OK'}, status=status.HTTP_200_OK)
-        else:
-            return Response(
-                {'error': result['error']},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-    except Exception as e:
-        logger.error(f'Orange Money webhook error: {e}')
-        return Response(
-            {'error': 'Webhook processing failed'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
 
 @csrf_exempt
 @api_view(['POST'])
